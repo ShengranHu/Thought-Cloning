@@ -1,11 +1,11 @@
-# Thought Cloning: Learning to Think while Acting by Imitating Human Thinking [arxiv TODO]
+# Thought Cloning: Learning to Think while Acting by Imitating Human Thinking [[arxiv]](https://arxiv.org/abs/2306.00323)
 
 ```
 @article{hu2023ThoughtCloning,
   title={{Thought Cloning}: Learning to Think while Acting by Imitating Human Thinking},
   author={Shengran Hu and Jeff Clune},
   year={2023},
-  journal={arXiv preprint arXiv:TODO},
+  journal={arXiv preprint arXiv:2306.00323},
 }
 ```
 
@@ -13,7 +13,8 @@
 <p align="center">
 <img width="500" src="./media/TC_framework.png" alt="Image">
 </p>
-This repository provides the official implementation for [TODO arxiv link] Thought Cloning: Learning to Think while Acting by Imitating Human Thinking. Thought Cloning (TC) is a novel imitation learning framework that enhances agent capability, AI Safety, and Interpretability by training agents to *think like humans*. This repository implements TC on a simulated partially observable 2D gridworld domain [BabyAI](https://github.com/mila-iqia/babyai) with a synthetic human thought dataset.
+
+This repository provides the official implementation for [Thought Cloning: Learning to Think while Acting by Imitating Human Thinking](https://arxiv.org/abs/2306.00323). Thought Cloning (TC) is a novel imitation learning framework that enhances agent capability, AI Safety, and Interpretability by training agents to *think like humans*. This repository implements TC on a simulated partially observable 2D gridworld domain [BabyAI](https://github.com/mila-iqia/babyai) with a synthetic human thought dataset.
 
 ## Installation 
 ### Creating Environment
