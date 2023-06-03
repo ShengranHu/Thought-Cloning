@@ -89,25 +89,6 @@ class ObsEmbedding(nn.Module):
             final_states = final_states[iperm_idx]
 
         return outputs
-    
-    def _get_subgoal_history_embedding(self, history_sg):
-        """
-        input:
-            history_sg: [batch, his_length, ~]
-
-        return:
-            hist_sg_embedding: [batch, his_length, sentence_length, instr_dim]
-        """
-        history_sg_list = []
-        for entry in history_sg:
-            entry_list = []
-            for sg in entry:
-                if sg == '<START>':
-                    entry_list.append(torch.zeros(1, self.instr_dim, device=self.device))
-                else:
-                    # assert sg in self.cache
-                    entry_list.append(self.cache(sg))
-            entry_tensor = torch.stack(entry_list, 0)
 
                 
 
