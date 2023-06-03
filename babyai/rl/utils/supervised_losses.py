@@ -10,7 +10,7 @@ required_heads = {'seen_state': 'binary',
                   'see_obj': 'binary',
                   'obj_in_instr': 'binary',
                   'in_front_of_what': 'multiclass9',  # multi class classifier with 9 possible classes
-                  'visit_proportion': 'continuous01',  # continous regressor with outputs in [0, 1]
+                  'visit_proportion': 'continuous01',  # continuous regressor with outputs in [0, 1]
                   'bot_action': 'binary'
                   }
 
