@@ -1,4 +1,4 @@
-# Thought Cloning: Learning to Think while Acting by Imitating Human Thinking [[project page]](https://www.shengranhu.com/ThoughtCloning/) [[arxiv]](https://arxiv.org/abs/2306.00323) [[video]](https://github.com/ShengranHu/Thought-Cloning/blob/main/media/introduction_video.md)
+# Thought Cloning: Learning to Think while Acting by Imitating Human Thinking [[project page]](https://www.shengranhu.com/ThoughtCloning/) [[arxiv]](https://arxiv.org/abs/2306.00323)
 
 ```
 @article{hu2023ThoughtCloning,
