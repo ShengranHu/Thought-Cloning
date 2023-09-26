@@ -1,15 +1,7 @@
-# Thought Cloning: Learning to Think while Acting by Imitating Human Thinking [[project page]](https://www.shengranhu.com/ThoughtCloning/) [[arxiv]](https://arxiv.org/abs/2306.00323)
+# [[NeurIPS '23 Spotlight] Thought Cloning: Learning to Think while Acting by Imitating Human Thinking](https://www.shengranhu.com/ThoughtCloning/) 
 
-```
-@article{hu2023ThoughtCloning,
-  title={{Thought Cloning}: Learning to Think while Acting by Imitating Human Thinking},
-  author={Shengran Hu and Jeff Clune},
-  year={2023},
-  journal={arXiv preprint arXiv:2306.00323},
-}
-```
+[![arXiv](https://img.shields.io/badge/arXiv-2306.00323-b31b1b.svg)](https://arxiv.org/abs/2306.00323)
 
-## Overview
 <p align="center">
 <img width="500" src="./media/TC_framework.png" alt="Image">
 </p>
@@ -83,3 +75,14 @@ scripts/evaluate_levels.py --env BabyAI-BossLevel-v0 --model <NAME_OF_MODEL> --t
 
 ## Related links
 Our implementation is based on [BabyAI 1.1](https://github.com/mila-iqia/babyai) (domain and Imitation Learning baseline), [dan-visdial](https://github.com/gicheonkang/dan-visdial/tree/master/encoders) (Upper-level Component Transformer encoder), and [visdial-rl](https://github.com/batra-mlp-lab/visdial-rl/blob/master/visdial/models/decoders/gen.py) (Upper-level Component RNN decoder).
+
+## Citation
+If you find this project useful, please consider citing:
+```
+@article{hu2023ThoughtCloning,
+  title={{Thought Cloning}: Learning to Think while Acting by Imitating Human Thinking},
+  author={Shengran Hu and Jeff Clune},
+  year={2023},
+  journal={Advances in Neural Information Processing Systems},
+}
+```
