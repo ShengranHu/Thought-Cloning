@@ -6,7 +6,7 @@
 <img width="500" src="./media/TC_framework.png" alt="Image">
 </p>
 
-This repository provides the official implementation for [Thought Cloning: Learning to Think while Acting by Imitating Human Thinking](https://arxiv.org/abs/2306.00323). Thought Cloning (TC) is a novel imitation learning framework that enhances agent capability, AI Safety, and Interpretability by training agents to *think like humans*. This repository implements TC on a simulated partially observable 2D gridworld domain [BabyAI](https://github.com/mila-iqia/babyai) with a synthetic human thought dataset. Also check the introduction [tweet thread](https://twitter.com/jeffclune/status/1664618665160085505).
+This repository provides the official implementation for [Thought Cloning: Learning to Think while Acting by Imitating Human Thinking](https://www.shengranhu.com/ThoughtCloning/). Thought Cloning (TC) is a novel imitation learning framework that enhances agent capability, AI Safety, and Interpretability by training agents to *think like humans*. This repository implements TC on a simulated partially observable 2D gridworld domain [BabyAI](https://github.com/mila-iqia/babyai) with a synthetic human thought dataset. Also check the introduction [tweet thread](https://twitter.com/jeffclune/status/1664618665160085505).
 
 ## Installation 
 ### Creating Environment
