@@ -1,5 +1,5 @@
 # Python 3.9
-torch 
+torch==1.13.1
 tensorboard
 tensorboardX
 tqdm
