@@ -131,3 +131,6 @@ dmypy.json
 *.png
 path-to-thought-cloning
 .vscode
+demo
+models
+testing_levels.pickle
