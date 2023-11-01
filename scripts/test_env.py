@@ -17,7 +17,7 @@ for i in range(10):
 # plt.imshow(obs["image"])
 # plt.show()
 # pdb.set_trace()
-x = env.render()
+x = env.render("rgb-array", tile_size=32)
 plt.imshow(x)
 print(np.average(x))
 plt.savefig("test.png")

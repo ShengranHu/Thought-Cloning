@@ -7,7 +7,6 @@ import pdb
 
 # Returns the performance of the agent on the environment for a particular number of episodes.
 def evaluate(agent, env, episodes, model_agent=True, offsets=None):
-    pdb.set_trace()
     # Initialize logs
     if model_agent:
         agent.model.eval()
@@ -92,7 +91,7 @@ class ManyEnvs(gym.Env):
 def batch_evaluate(
     agent, env_name, seed, episodes, return_obss_actions=False, pixel=False
 ):
-    num_envs = min(256, episodes)
+    num_envs = min(4, episodes)
 
     envs = []
     for i in range(num_envs):

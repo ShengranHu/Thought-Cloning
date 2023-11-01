@@ -242,7 +242,7 @@ class ImitationLearning(object):
 
         start_time = time.time()
         frames = 0
-        for batch_index in range(len(indices) // batch_size):
+        for batch_index in tqdm(range(len(indices) // batch_size)):
             batch = [demos[i] for i in indices[offset : offset + batch_size]]
             frames += sum([len(demo[3]) for demo in batch])
 
@@ -426,7 +426,6 @@ class ImitationLearning(object):
     def validate(self, episodes, verbose=True):
         if verbose:
             logger.info("Validating the model")
-        pdb.set_trace()
         if getattr(self.args, "multi_env", None):
             agent = utils.load_agent(
                 self.env[0], model_name=self.args.model, argmax=False, TC=True
