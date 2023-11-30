@@ -134,3 +134,5 @@ path-to-thought-cloning
 demo
 models
 testing_levels.pickle
+logs
+milestone
