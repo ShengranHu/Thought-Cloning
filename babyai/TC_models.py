@@ -668,3 +668,6 @@ class ThoughCloningModel(nn.Module, babyai.rl.RecurrentACModel):
             "value": value,
             "extra_predictions": dict(),
         }
+
+    def update(self, obs, memory, action, instr_embedding=None):
+        pass

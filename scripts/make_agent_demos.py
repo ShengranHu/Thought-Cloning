@@ -24,7 +24,6 @@ import random
 import blosc
 import torch
 import pdb
-
 import babyai.utils as utils
 
 # Parse arguments
@@ -102,6 +101,7 @@ parser.add_argument(
 parser.add_argument("--print", action="store_true", default=False, help="Print demos")
 
 args = parser.parse_args()
+# logger = WandbLogger("wandb", )
 logger = logging.getLogger(__name__)
 
 color_options = ["red", "green", "blue", "purple", "yellow", "grey"]
@@ -166,11 +166,10 @@ def print_demo_lengths(demos):
 
 
 def generate_demos(n_episodes, valid, seed, shift=0):
-    pdb.set_trace()
     utils.seed(seed)
 
     # Generate environment
-    env = gym.make(args.env)
+    env = gym.make("BabyAI-%s-v0" % (args.env))
 
     action_options = [env.actions.left, env.actions.right, env.actions.forward]
 
@@ -209,6 +208,7 @@ def generate_demos(n_episodes, valid, seed, shift=0):
         images = []
         directions = []
         subgoals = []
+        rewards = []
 
         try:
             action = None
@@ -246,6 +246,8 @@ def generate_demos(n_episodes, valid, seed, shift=0):
                 subgoals.append(sg_sentance)
                 images.append(obs["image"])
                 directions.append(obs["direction"])
+                # rewards.append(reward)
+                # pdb.set_trace()
 
                 obs = new_obs
             if reward > 0 and (
@@ -258,6 +260,7 @@ def generate_demos(n_episodes, valid, seed, shift=0):
                         directions,
                         actions,
                         subgoals,
+                        # rewards,
                         current_seed,
                     )
                 )
@@ -363,6 +366,7 @@ def generate_demos(n_episodes, valid, seed, shift=0):
 
     # Save demonstrations
     logger.info("Saving demos...")
+    pdb.set_trace()
     utils.save_demos(demos, demos_path)
     logger.info("{} demos saved".format(len(demos)))
     print_demo_lengths(demos[-100:])
