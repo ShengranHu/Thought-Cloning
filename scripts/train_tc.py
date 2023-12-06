@@ -86,7 +86,7 @@ parser.add_argument(
 
 
 def main(args):
-    pdb.set_trace()
+    # pdb.set_trace()
     if args.device is not None:
         torch.cuda.set_device(args.device)
     # Verify the arguments when we train on multiple environments

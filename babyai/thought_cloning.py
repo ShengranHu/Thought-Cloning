@@ -86,7 +86,6 @@ class ImitationLearning(object):
         self,
         args,
     ):
-        pdb.set_trace()
         self.args = args
 
         utils.seed(self.args.seed)
@@ -101,7 +100,6 @@ class ImitationLearning(object):
                 demos_path = utils.get_demos_path(demos, None, None, valid=False)
                 logger.info("loading {} of {} demos".format(episodes, demos))
                 train_demos = utils.load_demos(demos_path)
-                pdb.set_trace()
                 logger.info("loaded demos")
                 if episodes > len(train_demos):
                     raise ValueError(
@@ -937,14 +935,14 @@ class OfflineLearning(object):
             action_step = action_true[indexes]
             mask_step = mask[indexes]
             with torch.cuda.amp.autocast():
-                model_results = self.acmodel.train_forward(
+                model_results = self.acmodel.forward(
                     preprocessed_obs,
                     memory * mask_step,
-                    teacher_forcing_ratio=teacher_forcing,
                     instr_embedding=instr_embedding[episode_ids[indexes]],
                 )
                 dist = model_results["dist"]
                 memory = model_results["memory"]
+                value = model_results["value"]
                 logProbs = model_results["logProbs"]
 
                 # upper level loss

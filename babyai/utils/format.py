@@ -4,6 +4,7 @@ import numpy
 import re
 import torch
 import babyai.rl
+import pdb
 
 from .. import utils
 
@@ -16,21 +17,24 @@ class Vocabulary:
     def __init__(self, model_name):
         self.path = get_vocab_path(model_name)
         self.max_size = 100
-        self.startToken = 1
-        self.endToken = 2
-        self.startString = 'sos'
-        self.endString = 'eos'
+        self.startToken = 0
+        self.endToken = 1
+        self.startString = "sos"
+        self.endString = "eos"
 
         if os.path.exists(self.path):
             self.vocab = json.load(open(self.path))
         else:
-            self.vocab = {self.startString : self.startToken, self.endString : self.endToken}
+            self.vocab = {
+                self.startString: self.startToken,
+                self.endString: self.endToken,
+            }
 
     def __getitem__(self, token):
         if not (token in self.vocab.keys()):
             if len(self.vocab) >= self.max_size:
                 raise ValueError("Maximum vocabulary capacity reached")
-            self.vocab[token] = len(self.vocab) + 1
+            self.vocab[token] = len(self.vocab)
         return self.vocab[token]
 
     def save(self, path=None):
@@ -40,9 +44,9 @@ class Vocabulary:
         json.dump(self.vocab, open(path, "w"))
 
     def copy_vocab_from(self, other):
-        '''
+        """
         Copy the vocabulary of another Vocabulary object to the current object.
-        '''
+        """
         self.vocab.update(other.vocab)
 
 
@@ -59,7 +63,7 @@ class InstructionsPreprocessor(object):
                 old_vocab = Vocabulary(load_vocab_from)
                 self.vocab.copy_vocab_from(old_vocab)
             else:
-                raise FileNotFoundError('No pre-trained model under the specified name')
+                raise FileNotFoundError("No pre-trained model under the specified name")
 
     def __call__(self, obss, device=None):
         raw_instrs = []
@@ -74,11 +78,12 @@ class InstructionsPreprocessor(object):
         instrs = numpy.zeros((len(obss), max_instr_len))
 
         for i, instr in enumerate(raw_instrs):
-            instrs[i, :len(instr)] = instr
+            instrs[i, : len(instr)] = instr
 
         instrs = torch.tensor(instrs, device=device, dtype=torch.long)
         return instrs
-    
+
+
 class UnifiedLanguagePreprocessor(object):
     def __init__(self, model_name, load_vocab_from=None):
         self.model_name = model_name
@@ -94,42 +99,42 @@ class UnifiedLanguagePreprocessor(object):
                 old_vocab = Vocabulary(load_vocab_from)
                 self.vocab.copy_vocab_from(old_vocab)
             else:
-                raise FileNotFoundError('No pre-trained model under the specified name')
+                raise FileNotFoundError("No pre-trained model under the specified name")
 
     def __call__(self, obss, device=None, train=True):
-
         # instr
         raw_instrs = []
         max_instr_len = 0
 
         for obs in obss:
-            tokens = re.findall("([a-z]+)", obs['mission'].lower())
+            tokens = re.findall("([a-z]+)", obs["mission"].lower())
             instr = numpy.array([self.vocab[token] for token in tokens])
-            self.cache[obs['mission']] = instr
-                
-            
+            self.cache[obs["mission"]] = instr
+
             raw_instrs.append(instr)
             max_instr_len = max(len(instr), max_instr_len)
 
         instrs = numpy.zeros((len(obss), max_instr_len))
 
         for i, instr in enumerate(raw_instrs):
-            instrs[i, :len(instr)] = instr
+            instrs[i, : len(instr)] = instr
 
         overall_goals = torch.tensor(instrs, device=device, dtype=torch.long)
 
         if train:
-        # subgoal
+            # subgoal
             raw_instrs = []
             max_instr_len = 0
 
             for obs in obss:
-                if obs['subgoal'] in self.cache:
-                    instr = self.cache[obs['subgoal']]
+                if obs["subgoal"] in self.cache:
+                    instr = self.cache[obs["subgoal"]]
                 else:
-                    tokens = re.findall("([a-z]+)", 'sos ' + obs['subgoal'].lower() + ' eos')
+                    tokens = re.findall(
+                        "([a-z]+)", "sos " + obs["subgoal"].lower() + " eos"
+                    )
                     instr = numpy.array([self.vocab[token] for token in tokens])
-                    self.cache[obs['subgoal']] = instr
+                    self.cache[obs["subgoal"]] = instr
 
                 raw_instrs.append(instr)
                 max_instr_len = max(len(instr), max_instr_len)
@@ -137,7 +142,7 @@ class UnifiedLanguagePreprocessor(object):
             instrs = numpy.zeros((len(obss), max_instr_len))
 
             for i, instr in enumerate(raw_instrs):
-                instrs[i, :len(instr)] = instr
+                instrs[i, : len(instr)] = instr
 
             subgoals = torch.tensor(instrs, device=device, dtype=torch.long)
             max_subgoal_len = max_instr_len
@@ -147,19 +152,21 @@ class UnifiedLanguagePreprocessor(object):
             history_sgs = []
 
             for i, obs in enumerate(obss):
-                complete_flag[i] = 1 if obs['is_new_sg'] else 0
+                complete_flag[i] = 1 if obs["is_new_sg"] else 0
 
             complete_flag = torch.tensor(complete_flag, device=device, dtype=torch.long)
 
             return overall_goals, subgoals, complete_flag
         else:
             return overall_goals, None, None
-            
-class SubgoalCompletedFlagProprocessor():
+
+
+class SubgoalCompletedFlagProprocessor:
     def __call__(self, obss, device=None):
         flag = numpy.array([obs["is_new_sg"] for obs in obss])
-        flag = torch.tensor(flag, device=device) #dtype?
+        flag = torch.tensor(flag, device=device)  # dtype?
         return flag
+
 
 class RawImagePreprocessor(object):
     def __call__(self, obss, device=None):
@@ -182,16 +189,14 @@ class IntImagePreprocessor(object):
         images = torch.tensor(images, device=device, dtype=torch.long)
         return images
 
+
 class TCObssPreprocessor:
     def __init__(self, model_name, obs_space=None, load_vocab_from=None):
         self.image_preproc = RawImagePreprocessor()
         self.language_preproc = UnifiedLanguagePreprocessor(model_name, load_vocab_from)
         self.vocab = self.language_preproc.vocab
-        self.obs_space = {
-            "image": 147,
-            "instr": self.vocab.max_size
-        }
-        self.index2word = {index:word for word,index in self.vocab.vocab.items()}
+        self.obs_space = {"image": 147, "instr": self.vocab.max_size}
+        self.index2word = {index: word for word, index in self.vocab.vocab.items()}
 
     def __call__(self, obss, device=None, train=True):
         obs_ = babyai.rl.DictList()
@@ -199,10 +204,12 @@ class TCObssPreprocessor:
         if "image" in self.obs_space.keys():
             obs_.image = self.image_preproc(obss, device=device)
 
-        obs_.instr, obs_.subgoal, obs_.is_new_sg = self.language_preproc(obss, device=device, train=train)
+        obs_.instr, obs_.subgoal, obs_.is_new_sg = self.language_preproc(
+            obss, device=device, train=train
+        )
 
         return obs_
-    
+
     def decode_subgoal(self, subgoals):
         subgoal_sentences = []
         for idx in range(subgoals.size(0)):
@@ -215,25 +222,25 @@ class TCObssPreprocessor:
                 elif token == self.vocab.endToken:
                     break
                 else:
+                    # pdb.set_trace()
                     sg_sentence.append(self.index2word[token])
             subgoal_sentences.append(" ".join(sg_sentence))
-        
+
         return subgoal_sentences
-    
+
     def encode_subgoal(self, subgoal):
-        tokens = re.findall("([a-z]+)", 'sos ' + subgoal.lower() + ' eos')
+        # pdb.set_trace()
+        tokens = re.findall("([a-z]+)", "sos " + subgoal.lower() + " eos")
         instr = numpy.array([self.vocab[token] for token in tokens])
         return instr
+
 
 class ObssPreprocessor:
     def __init__(self, model_name, obs_space=None, load_vocab_from=None):
         self.image_preproc = RawImagePreprocessor()
         self.instr_preproc = InstructionsPreprocessor(model_name, load_vocab_from)
         self.vocab = self.instr_preproc.vocab
-        self.obs_space = {
-            "image": 147,
-            "instr": self.vocab.max_size
-        }
+        self.obs_space = {"image": 147, "instr": self.vocab.max_size}
 
     def __call__(self, obss, device=None):
         obs_ = babyai.rl.DictList()
@@ -250,13 +257,14 @@ class ObssPreprocessor:
 class IntObssPreprocessor(object):
     def __init__(self, model_name, obs_space, load_vocab_from=None):
         image_obs_space = obs_space.spaces["image"]
-        self.image_preproc = IntImagePreprocessor(image_obs_space.shape[-1],
-                                                  max_high=image_obs_space.high.max())
+        self.image_preproc = IntImagePreprocessor(
+            image_obs_space.shape[-1], max_high=image_obs_space.high.max()
+        )
         self.instr_preproc = InstructionsPreprocessor(load_vocab_from or model_name)
         self.vocab = self.instr_preproc.vocab
         self.obs_space = {
             "image": self.image_preproc.max_size,
-            "instr": self.vocab.max_size
+            "instr": self.vocab.max_size,
         }
 
     def __call__(self, obss, device=None):

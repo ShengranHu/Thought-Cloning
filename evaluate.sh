@@ -1,0 +1,2 @@
+python3 scripts/evaluate_levels.py --env OpenDoorLoc --model baseline --testing-levels-path testing_levels.pickle
+python3 scripts/evaluate_levels.py --env OpenDoorLoc --model baseline_noisy --testing-levels-path testing_levels.pickle          

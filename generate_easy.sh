@@ -1,2 +1,4 @@
-python3 scripts/make_agent_demos.py --episodes 2048 --env GoToRedBallNoDists --noise-rate 0.01 --on-exception crash
-python3 scripts/make_agent_demos.py --episodes 128 --env GoToRedBallNoDists --noise-rate 0.01 --on-exception crash
+python3 scripts/make_agent_demos.py --episodes 8192 --env UnlockLocalDist --noise-rate 0
+python3 scripts/make_agent_demos.py --episodes 1024 --env UnlockLocalDist --noise-rate 0
+python3 scripts/make_agent_demos.py --episodes 8192 --env UnlockLocalDist --noise-rate 0.3 
+python3 scripts/make_agent_demos.py --episodes 1024 --env UnlockLocalDist --noise-rate 0.3

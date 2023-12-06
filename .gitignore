@@ -137,3 +137,6 @@ testing_levels.pickle
 logs
 milestone
 demos
+zeroshot_baseline_noisy.csv
+.gitignore
+zeroshot_baseline.csv

@@ -1,199 +1,226 @@
-from typing import Sequence, Callable, Tuple, Optional
-
+import numpy
 import torch
-from torch import nn
-
-import numpy as np
-
-import utils.pytorch_util as ptu
-import pdb
+import torch.nn.functional as F
 
 
-class DQNAgent(nn.Module):
+from babyai.rl.algos.base_tc import BaseAlgo
+
+
+class OfflineRL(BaseAlgo):
+    """The class for the Proximal Policy Optimization algorithm
+    ([Schulman et al., 2015](https://arxiv.org/abs/1707.06347))."""
+
     def __init__(
         self,
-        observation_shape: Sequence[int],
-        num_actions: int,
-        make_critic: Callable[[Tuple[int, ...], int], nn.Module],
-        make_optimizer: Callable[[torch.nn.ParameterList], torch.optim.Optimizer],
-        make_lr_schedule: Callable[
-            [torch.optim.Optimizer], torch.optim.lr_scheduler._LRScheduler
-        ],
-        discount: float,
-        target_update_period: int,
-        use_double_q: bool = False,
-        clip_grad_norm: Optional[float] = None,
+        envs,
+        acmodel,
+        num_frames_per_proc=None,
+        discount=0.99,
+        lr=7e-4,
+        beta1=0.9,
+        beta2=0.999,
+        gae_lambda=0.95,
+        entropy_coef=0.01,
+        value_loss_coef=0.5,
+        max_grad_norm=0.5,
+        recurrence=4,
+        adam_eps=1e-5,
+        clip_eps=0.2,
+        epochs=4,
+        batch_size=256,
+        preprocess_obss=None,
+        reshape_reward=None,
+        aux_info=None,
     ):
-        super().__init__()
+        num_frames_per_proc = num_frames_per_proc or 128
 
-        self.critic = make_critic(observation_shape, num_actions)
-        self.target_critic = make_critic(observation_shape, num_actions)
-        self.critic_optimizer = make_optimizer(self.critic.parameters())
-        self.lr_scheduler = make_lr_schedule(self.critic_optimizer)
+        super().__init__(
+            envs,
+            acmodel,
+            num_frames_per_proc,
+            discount,
+            lr,
+            gae_lambda,
+            entropy_coef,
+            value_loss_coef,
+            max_grad_norm,
+            recurrence,
+            preprocess_obss,
+            reshape_reward,
+            aux_info,
+        )
 
-        self.observation_shape = observation_shape
-        self.num_actions = num_actions
-        self.discount = discount
-        self.target_update_period = target_update_period
-        self.clip_grad_norm = clip_grad_norm
-        self.use_double_q = use_double_q
+        self.clip_eps = clip_eps
+        self.epochs = epochs
+        self.batch_size = batch_size
 
-        self.critic_loss = nn.MSELoss()
+        assert self.batch_size % self.recurrence == 0
 
-        self.update_target_critic()
+        self.optimizer = torch.optim.Adam(
+            self.acmodel.parameters(), lr, (beta1, beta2), eps=adam_eps
+        )
+        self.batch_num = 0
 
-    def get_action(self, observation: np.ndarray, epsilon: float = 0.02) -> int:
+    def update_parameters(self):
+        # Collect experiences
+
+        self.acmodel
+        exps, logs = self.collect_experiences()
         """
-        Used for evaluation.
-        """
-        observation = ptu.from_numpy(np.asarray(observation))[None]
-
-        # TODO(student): get the action from the critic using an epsilon-greedy strategy
-        """
-        action = ...
-        """
-        if torch.rand(1) < epsilon:
-            action = torch.randint(self.num_actions, ())
-        else:
-            qa_values: torch.Tensor = self.critic(observation)
-            action = qa_values.argmax(dim=-1)
-        # ENDTODO
-
-        return ptu.to_numpy(action).squeeze(0).item()
-
-    def compute_critic_loss(
-        self,
-        obs: torch.Tensor,
-        action: torch.Tensor,
-        reward: torch.Tensor,
-        next_obs: torch.Tensor,
-        done: torch.Tensor,
-    ) -> Tuple[torch.Tensor, dict, dict]:
-        """
-        Compute the loss for the DQN critic.
-
-        Returns:
-         - loss: torch.Tensor, the MSE loss for the critic
-         - metrics: dict, a dictionary of metrics to log
-         - variables: dict, a dictionary of variables that can be used in subsequent calculations
+        exps is a DictList with the following keys ['obs', 'memory', 'mask', 'action', 'value', 'reward',
+         'advantage', 'returnn', 'log_prob'] and ['collected_info', 'extra_predictions'] if we use aux_info
+        exps.obs is a DictList with the following keys ['image', 'instr']
+        exps.obj.image is a (n_procs * n_frames_per_proc) x image_size 4D tensor
+        exps.obs.instr is a (n_procs * n_frames_per_proc) x (max number of words in an instruction) 2D tensor
+        exps.memory is a (n_procs * n_frames_per_proc) x (memory_size = 2*image_embedding_size) 2D tensor
+        exps.mask is (n_procs * n_frames_per_proc) x 1 2D tensor
+        if we use aux_info: exps.collected_info and exps.extra_predictions are DictLists with keys
+        being the added information. They are either (n_procs * n_frames_per_proc) 1D tensors or
+        (n_procs * n_frames_per_proc) x k 2D tensors where k is the number of classes for multiclass classification
         """
 
-        (batch_size,) = reward.shape
-        # TODO(student): paste in your code from HW3, and make sure the return values exist
-        with torch.no_grad():
-            # TODO(student): compute target values
+        for _ in range(self.epochs):
+            # Initialize log values
+
+            log_entropies = []
+            log_values = []
+            log_policy_losses = []
+            log_value_losses = []
+            log_grad_norms = []
+
+            log_losses = []
+
             """
-            next_qa_values = ...
-
-            if self.use_double_q:
-                raise NotImplementedError
-            else:
-                next_action = ...
-
-            next_q_values = ...
-            target_values = ...
+            For each epoch, we create int(total_frames / batch_size + 1) batches, each of size batch_size (except
+            maybe the last one. Each batch is divided into sub-batches of size recurrence (frames are contiguous in
+            a sub-batch), but the position of each sub-batch in a batch and the position of each batch in the whole
+            list of frames is random thanks to self._get_batches_starting_indexes().
             """
-            next_qa_values: torch.Tensor = self.target_critic(next_obs)
-            assert next_qa_values.shape == (
-                batch_size,
-                self.num_actions,
-            ), next_qa_values.shape
 
-            if not self.use_double_q:
-                # Standard
-                next_q_values, _ = next_qa_values.max(dim=-1)
-            else:
-                # Double-Q
-                doubleq_next_qa_values: torch.Tensor = self.critic(next_obs)
-                doubleq_next_action = doubleq_next_qa_values.argmax(dim=-1)
-                next_q_values = torch.gather(
-                    next_qa_values, 1, doubleq_next_action.unsqueeze(1)
-                ).squeeze(1)
+            for inds in self._get_batches_starting_indexes():
+                # inds is a numpy array of indices that correspond to the beginning of a sub-batch
+                # there are as many inds as there are batches
+                # Initialize batch values
 
-            assert next_q_values.shape == (batch_size,), next_q_values.shape
+                batch_entropy = 0
+                batch_value = 0
+                batch_policy_loss = 0
+                batch_value_loss = 0
+                batch_loss = 0
 
-            target_values: torch.Tensor = reward + self.discount * next_q_values * (
-                1 - done.float()
-            )
-            assert target_values.shape == (batch_size,), target_values.shape
+                # Initialize memory
 
-        # Predict Q-values
-        qa_values = self.critic(obs)
-        assert qa_values.shape == (batch_size, self.num_actions), qa_values.shape
+                memory = exps.memory[inds]
 
-        # Select Q-values for the actions that were actually taken
-        q_values = torch.gather(qa_values, 1, action.unsqueeze(1)).squeeze(1)
-        assert q_values.shape == (batch_size,), q_values.shape
+                for i in range(self.recurrence):
+                    # Create a sub-batch of experience
+                    sb = exps[inds + i]
 
-        # Compute loss
-        loss: torch.Tensor = self.critic_loss(q_values, target_values)
-        # ENDTODO
+                    # Compute loss
 
-        # self.critic_optimizer.zero_grad()
-        # loss.backward()
-        grad_norm = torch.nn.utils.clip_grad.clip_grad_norm_(
-            self.critic.parameters(), self.clip_grad_norm or float("inf")
-        )
-        # self.critic_optimizer.step()
+                    model_results = self.acmodel(sb.obs, memory * sb.mask)
+                    dist = model_results["dist"]
+                    value = model_results["value"]
+                    memory = model_results["memory"]
+                    extra_predictions = model_results["extra_predictions"]
 
-        # self.lr_scheduler.step()
-        return (
-            loss,
-            {
-                "critic_loss": loss.item(),
-                "q_values": q_values.mean().item(),
-                "target_values": target_values.mean().item(),
-            },
-            {
-                "qa_values": qa_values,
-                "q_values": q_values,
-            },
-        )
+                    entropy = dist.entropy().mean()
 
-    def update_critic(
-        self,
-        obs: torch.Tensor,
-        action: torch.Tensor,
-        reward: torch.Tensor,
-        next_obs: torch.Tensor,
-        done: torch.Tensor,
-    ) -> dict:
-        """Update the DQN critic, and return stats for logging."""
-        loss, metrics, _ = self.compute_critic_loss(obs, action, reward, next_obs, done)
+                    ratio = torch.exp(dist.log_prob(sb.action) - sb.log_prob)
+                    surr1 = ratio * sb.advantage
+                    surr2 = (
+                        torch.clamp(ratio, 1.0 - self.clip_eps, 1.0 + self.clip_eps)
+                        * sb.advantage
+                    )
+                    policy_loss = -torch.min(surr1, surr2).mean()
 
-        self.critic_optimizer.zero_grad()
-        loss.backward()
-        grad_norm = torch.nn.utils.clip_grad.clip_grad_norm_(
-            self.critic.parameters(), self.clip_grad_norm or float("inf")
-        )
-        metrics["grad_norm"] = grad_norm.item()
-        self.critic_optimizer.step()
+                    value_clipped = sb.value + torch.clamp(
+                        value - sb.value, -self.clip_eps, self.clip_eps
+                    )
+                    surr1 = (value - sb.returnn).pow(2)
+                    surr2 = (value_clipped - sb.returnn).pow(2)
+                    value_loss = torch.max(surr1, surr2).mean()
 
-        self.lr_scheduler.step()
+                    loss = (
+                        policy_loss
+                        - self.entropy_coef * entropy
+                        + self.value_loss_coef * value_loss
+                    )
 
-        return metrics
+                    # Update batch values
 
-    def update_target_critic(self):
-        self.target_critic.load_state_dict(self.critic.state_dict())
+                    batch_entropy += entropy.item()
+                    batch_value += value.mean().item()
+                    batch_policy_loss += policy_loss.item()
+                    batch_value_loss += value_loss.item()
+                    batch_loss += loss
 
-    def update(
-        self,
-        obs: torch.Tensor,
-        action: torch.Tensor,
-        reward: torch.Tensor,
-        next_obs: torch.Tensor,
-        done: torch.Tensor,
-        step: int,
-    ) -> dict:
+                    # Update memories for next epoch
+
+                    if i < self.recurrence - 1:
+                        exps.memory[inds + i + 1] = memory.detach()
+
+                # Update batch values
+
+                batch_entropy /= self.recurrence
+                batch_value /= self.recurrence
+                batch_policy_loss /= self.recurrence
+                batch_value_loss /= self.recurrence
+                batch_loss /= self.recurrence
+
+                # Update actor-critic
+
+                self.optimizer.zero_grad()
+                batch_loss.backward()
+                grad_norm = (
+                    sum(
+                        p.grad.data.norm(2) ** 2
+                        for p in self.acmodel.parameters()
+                        if p.grad is not None
+                    )
+                    ** 0.5
+                )
+                torch.nn.utils.clip_grad_norm_(
+                    self.acmodel.parameters(), self.max_grad_norm
+                )
+                self.optimizer.step()
+
+                # Update log values
+
+                log_entropies.append(batch_entropy)
+                log_values.append(batch_value)
+                log_policy_losses.append(batch_policy_loss)
+                log_value_losses.append(batch_value_loss)
+                log_grad_norms.append(grad_norm.item())
+                log_losses.append(batch_loss.item())
+
+        # Log some values
+
+        logs["entropy"] = numpy.mean(log_entropies)
+        logs["value"] = numpy.mean(log_values)
+        logs["policy_loss"] = numpy.mean(log_policy_losses)
+        logs["value_loss"] = numpy.mean(log_value_losses)
+        logs["grad_norm"] = numpy.mean(log_grad_norms)
+        logs["loss"] = numpy.mean(log_losses)
+
+        return logs
+
+    def _get_batches_starting_indexes(self):
+        """Gives, for each batch, the indexes of the observations given to
+        the model and the experiences used to compute the loss at first.
+        Returns
+        -------
+        batches_starting_indexes : list of list of int
+            the indexes of the experiences to be used at first for each batch
+
         """
-        Update the DQN agent, including both the critic and target.
-        """
-        # TODO(student): paste in your code from HW3
 
-        # TODO(student): update the critic, and the target if needed
-        critic_stats = self.update_critic(obs, action, reward, next_obs, done)
+        indexes = numpy.arange(0, self.num_frames, self.recurrence)
+        indexes = numpy.random.permutation(indexes)
 
-        if step % self.target_update_period == 0:
-            self.update_target_critic()
-        # ENDTODO
-        return critic_stats
+        num_indexes = self.batch_size // self.recurrence
+        batches_starting_indexes = [
+            indexes[i : i + num_indexes] for i in range(0, len(indexes), num_indexes)
+        ]
+
+        return batches_starting_indexes

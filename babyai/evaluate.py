@@ -95,7 +95,7 @@ def batch_evaluate(
 
     envs = []
     for i in range(num_envs):
-        env = gym.make(env_name)
+        env = gym.make("BabyAI-%s-v0" % (env_name))
         if pixel:
             env = RGBImgPartialObsWrapper(env)
         envs.append(env)
@@ -162,7 +162,7 @@ def TC_batch_evaluate(
     # print("using default evalutaion: 512 many envs + no decode subgoal + no.cpu()")
     envs = []
     for i in range(num_envs):
-        env = gym.make(env_name)
+        env = gym.make("BabyAI-%s-v0" % (env_name))
         envs.append(env)
 
     env = ManyEnvs(envs)

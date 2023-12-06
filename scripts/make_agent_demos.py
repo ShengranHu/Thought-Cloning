@@ -366,7 +366,7 @@ def generate_demos(n_episodes, valid, seed, shift=0):
 
     # Save demonstrations
     logger.info("Saving demos...")
-    pdb.set_trace()
+    # pdb.set_trace()
     utils.save_demos(demos, demos_path)
     logger.info("{} demos saved".format(len(demos)))
     print_demo_lengths(demos[-100:])
