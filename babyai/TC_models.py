@@ -345,7 +345,7 @@ class LowerLevel(nn.Module):
 
         # Define critic's model
         self.critic = nn.Sequential(
-            nn.Linear(self.embedding_size, 64), nn.Tanh(), nn.Linear(64, 1)
+            nn.Linear(self.embedding_size, 64), nn.Tanh(), nn.Linear(64, action_space.n)
         )
 
         # Initialize parameters correctly
@@ -669,5 +669,72 @@ class ThoughCloningModel(nn.Module, babyai.rl.RecurrentACModel):
             "extra_predictions": dict(),
         }
 
-    def update(self, obs, memory, action, instr_embedding=None):
-        pass
+    def rl_forward(self, obs, memory, instr_embedding=None):
+        if instr_embedding == None:
+            instr_embedding = self._get_instr_embedding(obs.instr)
+
+        gt_subgoal = obs.subgoal
+        gt_subgoal_embedding = self.obs_embedding.get_language_embedding(
+            gt_subgoal, is_subgoal=True
+        )
+        visual_embedding = self.obs_embedding.get_visual_embedding(obs.image)
+
+        # memory handle
+        upper_memory = memory[:, 0, :]
+        lower_memory = memory[:, 1, :]
+        subgoal_histories = memory[:, 2, :]
+        logProbs, subgoal, upper_memory = self.upper_level_policy.forward(
+            visual_embedding,
+            upper_memory,
+            instr_embedding,
+            obs.instr,
+            subgoal_histories,
+            teacher_forcing=0,
+            gt_subgoal=gt_subgoal,
+            gt_subgoal_embedding=gt_subgoal_embedding,
+        )
+        # encode subgoal
+        subgoal_embedding = self.obs_embedding.get_language_embedding(
+            subgoal, is_subgoal=True
+        )
+
+        # attn subgoal with new memory
+        mask = (subgoal == 0).unsqueeze(1)
+        mask = mask[:, :, : subgoal_embedding.shape[1]]
+        subgoal_embedding = subgoal_embedding[:, : mask.shape[2], :]
+
+        keys = self.upper_level_policy.memory2key_sg(upper_memory).unsqueeze(1)
+        next_subgoal_history, _ = self.upper_level_policy.attention(
+            keys, subgoal_embedding, subgoal_embedding, mask
+        )
+
+        # update subgoal_histories
+        hidden = (
+            subgoal_histories[:, : self.semi_memory_size],
+            subgoal_histories[:, self.semi_memory_size :],
+        )
+        hidden = self.upper_level_policy.history_rnn(
+            next_subgoal_history.squeeze(1), hidden
+        )
+        subgoal_histories = torch.cat(hidden, dim=1)
+
+        # lower level
+        dist, value, lower_memory = self.lower_level_policy.forward(
+            visual_embedding,
+            lower_memory,
+            subgoal,
+            subgoal_embedding,
+            obs.instr,
+            instr_embedding,
+        )
+
+        # handle memory
+        memory = torch.stack((upper_memory, lower_memory, subgoal_histories), dim=1)
+
+        return {
+            "memory": memory,
+            "dist": dist,
+            "subgoal": gt_subgoal,
+            "predicted_subgoal": subgoal,
+            "value": value,
+        }

@@ -28,6 +28,7 @@ parser.add_argument("--expr-group-name", default="", help="expr group name")
 
 def TC_batch_evaluate(agent, env_name, seeds, return_obss_actions=False):
     num_envs = len(seeds)
+    # pdb.set_trace()
     # print("using default evalutaion: 512 many envs + no decode subgoal + no.cpu()")
     envs = []
     for i in range(num_envs):

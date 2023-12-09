@@ -146,6 +146,66 @@ class TCModelAgent(Agent):
             self.memory *= 1 - done
 
 
+class TCCriticAgent(Agent):
+    """A model-based agent. This agent behaves using a model."""
+
+    def __init__(self, model_or_name, obss_preprocessor, argmax):
+        if obss_preprocessor is None:
+            assert isinstance(model_or_name, str)
+            obss_preprocessor = utils.TCObssPreprocessor(model_or_name)
+        self.obss_preprocessor = obss_preprocessor
+        if isinstance(model_or_name, str):
+            self.model = utils.load_model(model_or_name)
+            if torch.cuda.is_available():
+                self.model.cuda()
+        else:
+            self.model = model_or_name
+        self.device = next(self.model.parameters()).device
+        self.argmax = argmax
+        self.memory = None
+
+    def act_batch(self, many_obs):
+        if self.memory is None:
+            self.memory = torch.zeros(
+                len(many_obs), 3, self.model.memory_size, device=self.device
+            )
+        elif self.memory.shape[0] != len(many_obs):
+            raise ValueError("stick to one batch size for the lifetime of an agent")
+
+        preprocessed_obs = self.obss_preprocessor(
+            many_obs, device=self.device, train=False
+        )
+
+        with torch.no_grad():
+            beamSize = 1
+
+            model_results = self.model(preprocessed_obs, self.memory, beamSize=beamSize)
+            dist = model_results["dist"]
+            value = model_results["value"]
+            self.memory = model_results["memory"]
+            subgoal_vector = model_results["subgoal"]
+            # try:
+            subgoal = self.obss_preprocessor.decode_subgoal(subgoal_vector)
+            # except Exception as e:
+            #     print("Error:", e)
+            #     subgoal = None
+
+        action = torch.argmax(value, dim=-1)
+
+        return {"action": action, "dist": dist, "value": value, "subgoal": subgoal}
+
+    def act(self, obs):
+        return self.act_batch([obs])
+
+    def analyze_feedback(self, reward, done):
+        if isinstance(done, tuple):
+            for i in range(len(done)):
+                if done[i]:
+                    self.memory[i, :, :] *= 0.0
+        else:
+            self.memory *= 1 - done
+
+
 class RandomAgent:
     """A newly initialized model-based agent."""
 

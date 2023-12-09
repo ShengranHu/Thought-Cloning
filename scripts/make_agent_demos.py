@@ -246,7 +246,7 @@ def generate_demos(n_episodes, valid, seed, shift=0):
                 subgoals.append(sg_sentance)
                 images.append(obs["image"])
                 directions.append(obs["direction"])
-                # rewards.append(reward)
+                rewards.append(reward)
                 # pdb.set_trace()
 
                 obs = new_obs
@@ -260,7 +260,7 @@ def generate_demos(n_episodes, valid, seed, shift=0):
                         directions,
                         actions,
                         subgoals,
-                        # rewards,
+                        rewards,
                         current_seed,
                     )
                 )

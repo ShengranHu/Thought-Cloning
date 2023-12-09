@@ -8,8 +8,13 @@ import itertools
 import torch
 from babyai.evaluate import TC_batch_evaluate
 import babyai.utils as utils
+import wandb
+import babyai.utils.ptu as ptu
+
 from babyai.rl import DictList
 from babyai.TC_models import ThoughCloningModel
+from babyai.rl.algos.DQN import DQN
+from babyai.rl.algos.AWAC import AWAC
 from babyai.submodules import maskedNll
 import multiprocessing
 import os
@@ -305,7 +310,12 @@ class ImitationLearning(object):
         )
 
         # Observations, true action, values and done for each of the stored demostration
-        obss, action_true, done = flat_batch[:, 0], flat_batch[:, 1], flat_batch[:, 2]
+        obss, action_true, done, rewards = (
+            flat_batch[:, 0],
+            flat_batch[:, 1],
+            flat_batch[:, 2],
+            flat_batch[:, 3],
+        )
         action_true = torch.tensor(
             [action for action in action_true], device=self.device, dtype=torch.long
         )
@@ -653,6 +663,7 @@ class OfflineLearning(object):
         args,
     ):
         self.args = args
+        wandb.init(project="Thought-Cloning")
 
         utils.seed(self.args.seed)
         self.val_seed = self.args.val_seed
@@ -666,7 +677,6 @@ class OfflineLearning(object):
                 demos_path = utils.get_demos_path(demos, None, None, valid=False)
                 logger.info("loading {} of {} demos".format(episodes, demos))
                 train_demos = utils.load_demos(demos_path)
-                pdb.set_trace()
                 logger.info("loaded demos")
                 if episodes > len(train_demos):
                     raise ValueError(
@@ -700,7 +710,7 @@ class OfflineLearning(object):
             action_space = self.env[0].action_space
 
         else:
-            self.env = gym.make(self.args.env)
+            self.env = gym.make("BabyAI-%s-v0" % (self.args.env))
 
             demos_path = utils.get_demos_path(
                 args.demos, args.env, args.demos_origin, valid=False
@@ -764,8 +774,25 @@ class OfflineLearning(object):
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+        self.rl_algo = AWAC(
+            0.1,
+            discount=0.99,
+            target_update_period=256,
+            critic_optimizer=self.optimizer,
+            use_double_q=True,
+        )
+        self.step = 0
+        self.target = ThoughCloningModel(
+            self.obss_preprocessor.obs_space,
+            action_space,
+            args.image_dim,
+            args.memory_dim,
+            args.instr_dim,
+        )
+
         if torch.cuda.is_available():
             self.acmodel.to(self.device)
+            self.target.to(self.device)
             logger.info("send model to {}".format(self.device))
 
     @staticmethod
@@ -805,38 +832,24 @@ class OfflineLearning(object):
             self.acmodel.eval()
 
         # Log dictionary
-        log = {"entropy": [], "policy_loss": [], "accuracy": [], "final_sg_loss": []}
+        log = {}
 
         start_time = time.time()
         frames = 0
         for batch_index in tqdm(range(len(indices) // batch_size)):
+            if self.step % self.args.target_update_period == 0:
+                self.target.load_state_dict(self.acmodel.state_dict())
             batch = [demos[i] for i in indices[offset : offset + batch_size]]
             frames += sum([len(demo[3]) for demo in batch])
 
             try:
-                _log = self.run_epoch_recurrence_one_batch(
-                    batch, is_training=is_training
-                )
-
-                log["entropy"].append(_log["entropy"])
-                log["policy_loss"].append(_log["policy_loss"])
-                log["final_sg_loss"].append(_log["final_sg_loss"])
-                log["accuracy"].append(_log["accuracy"])
-
-                logger.info(
-                    "batch {}, FPS so far {:.3f}, Accuracy {:.3f}, Policy Loss: {:.3f}, Subgoal Loss: {:.3f}, Final Loss: {:.3f}".format(
-                        batch_index,
-                        frames / (time.time() - start_time) if frames else 0,
-                        _log["accuracy"],
-                        _log["policy_loss"],
-                        _log["final_sg_loss"],
-                        _log["final_loss"],
-                    )
-                )
+                self.run_epoch_recurrence_one_batch(batch, is_training=is_training)
+                self.step += 1
             except Exception as e:
                 print(e)
                 gc.collect()
                 torch.cuda.empty_cache()
+                raise
 
             offset += batch_size
 
@@ -872,7 +885,27 @@ class OfflineLearning(object):
         )
 
         # Observations, true action, values and done for each of the stored demostration
-        obss, action_true, done = flat_batch[:, 0], flat_batch[:, 1], flat_batch[:, 2]
+        obss, action_true, done, rewards = (
+            flat_batch[:, 0],
+            flat_batch[:, 1],
+            flat_batch[:, 2],
+            flat_batch[:, 3],
+        )
+        next_obss = obss[1:].copy()
+        next_obss = np.concatenate(
+            [
+                next_obss,
+                [
+                    {
+                        "image": np.zeros_like(obss[0]["image"]),
+                        "direction": 0,
+                        "mission": "task complete",
+                        "subgoal": "none",
+                        "is_new_sg": False,
+                    }
+                ],
+            ]
+        )
         action_true = torch.tensor(
             [action for action in action_true], device=self.device, dtype=torch.long
         )
@@ -891,18 +924,22 @@ class OfflineLearning(object):
             preprocessed_first_obs.instr
         )
 
+        log = []
         # Loop terminates when every observation in the flat_batch has been handled
         while True:
             # taking observations and done located at inds
             obs = obss[inds]
+            next_obs = next_obss[inds]
             done_step = done[inds]
+            reward_step = rewards[inds]
             preprocessed_obs = self.obss_preprocessor(obs, device=self.device)
+            preprocessed_next_obs = self.obss_preprocessor(next_obs, device=self.device)
             with torch.no_grad():
                 # taking the memory till len(inds), as demos beyond that have already finished
                 new_memory = self.acmodel.train_forward(
                     preprocessed_obs,
                     memory[: len(inds), :, :],
-                    teacher_forcing_ratio=teacher_forcing,
+                    teacher_forcing_ratio=0,
                     instr_embedding=instr_embedding[: len(inds)],
                 )["memory"]
 
@@ -928,65 +965,54 @@ class OfflineLearning(object):
         total_frames = len(indexes) * self.args.recurrence
 
         scaler = torch.cuda.amp.GradScaler()
-
+        loss = 0
         for _ in range(self.args.recurrence):
             obs = obss[indexes]
+            next_obs = obss[indexes]
             preprocessed_obs = self.obss_preprocessor(obs, device=self.device)
+            preprocessed_next_obs = self.obss_preprocessor(next_obs, device=self.device)
             action_step = action_true[indexes]
+            reward_step = rewards[indexes]
             mask_step = mask[indexes]
+            done_rl = done[indexes]
             with torch.cuda.amp.autocast():
-                model_results = self.acmodel.forward(
+                model_results = self.acmodel.rl_forward(
                     preprocessed_obs,
                     memory * mask_step,
                     instr_embedding=instr_embedding[episode_ids[indexes]],
                 )
-                dist = model_results["dist"]
-                memory = model_results["memory"]
-                value = model_results["value"]
-                logProbs = model_results["logProbs"]
+                with torch.no_grad():
+                    next_results = self.acmodel.rl_forward(
+                        preprocessed_next_obs,
+                        memory * mask_step,
+                        instr_embedding=instr_embedding[episode_ids[indexes]],
+                    )
+                    target_next = self.target.rl_forward(
+                        preprocessed_next_obs,
+                        memory * mask_step,
+                        instr_embedding=instr_embedding[episode_ids[indexes]],
+                    )
 
-                # upper level loss
-                sg_loss = maskedNll(logProbs, preprocessed_obs.subgoal)
-
-                # lower level loss
-                entropy = dist.entropy().mean()
-                policy_loss = -dist.log_prob(action_step).mean()
-
-                loss = (
-                    policy_loss
-                    - self.args.entropy_coef * entropy
-                    + self.args.sg_coef * sg_loss
+                (critic_l, actor_l), rst = self.rl_algo.update(
+                    model_results["value"],
+                    action_step,
+                    torch.from_numpy(reward_step.astype("float16")).to(self.device),
+                    target_next["value"],
+                    torch.from_numpy(done_rl.astype("bool")).to(self.device),
+                    model_results["dist"],
                 )
+                loss += critic_l
+                loss += actor_l
+                log.append(rst)
+                wandb.log(rst)
+            indexes += 1
 
-                action_pred = dist.probs.max(1, keepdim=True)[1]
-                accuracy += (
-                    float((action_pred == action_step.unsqueeze(1)).sum())
-                    / total_frames
-                )
-
-                final_sg_loss += sg_loss
-                final_loss += loss
-                final_entropy += entropy
-                final_policy_loss += policy_loss
-                indexes += 1
-
-        with torch.cuda.amp.autocast():
-            final_loss /= self.args.recurrence
-
-        if is_training:
-            self.optimizer.zero_grad()
-            scaler.scale(final_loss).backward()
-            # final_loss.backward()
-            scaler.step(self.optimizer)
-            # self.optimizer.step()
-            scaler.update()
-
-        log = {}
-        log["entropy"] = float(final_entropy / self.args.recurrence)
-        log["policy_loss"] = float(final_policy_loss / self.args.recurrence)
-        log["final_sg_loss"] = float(final_sg_loss / self.args.recurrence)
-        log["accuracy"] = float(accuracy)
-        log["final_loss"] = float(final_loss)
+        self.optimizer.zero_grad()
+        loss.backward()
+        grad_norm = torch.nn.utils.clip_grad.clip_grad_norm_(
+            self.acmodel.parameters(), 5
+        )
+        self.optimizer.step()
 
         return log
 
@@ -1024,6 +1050,7 @@ class OfflineLearning(object):
         mean_return = {
             tid: np.mean(log["return_per_episode"]) for tid, log in enumerate(logs)
         }
+        wandb.log(mean_return)
         return mean_return
 
     def train(
@@ -1077,17 +1104,6 @@ class OfflineLearning(object):
             if self.args.warm_start and status["i"] < 5:
                 for g in self.optimizer.param_groups:
                     g["lr"] = self.args.lr / 5 * (status["i"] + 1)
-
-            # change self.teacher_forcing_ratio
-            if status["i"] >= self.args.stop_tf:
-                post_epoch = status["i"] - self.args.stop_tf + 1
-                tot = self.args.epochs - self.args.stop_tf
-
-                self.teacher_forcing_ratio = max(0, 1 - (post_epoch) / tot)
-
-                if post_epoch > 40 or status["i"] > 120:
-                    for g in self.optimizer.param_groups:
-                        g["lr"] = self.args.lr * 0.5
 
             logger.info("set lr to {}".format(self.optimizer.param_groups[0]["lr"]))
             logger.info(
@@ -1193,6 +1209,7 @@ class OfflineLearning(object):
                     )
                     if torch.cuda.is_available():
                         self.acmodel.cuda()
+                        self.target.cuda()
 
             if torch.cuda.is_available():
                 self.acmodel.cpu()
@@ -1208,6 +1225,7 @@ class OfflineLearning(object):
                 )
             if torch.cuda.is_available():
                 self.acmodel.cuda()
+                self.target.cuda()
             with open(status_path, "w") as dst:
                 json.dump(status, dst)
 

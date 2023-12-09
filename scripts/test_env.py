@@ -1,11 +1,12 @@
 from babyai.levels.test_levels import Level_TestGoToBlocked
+from babyai.levels.bonus_levels import Level_UnlockLocalDist
 from babyai.levels.iclr19_levels import Level_BossLevelNoUnlock
 from gym_minigrid import rendering
 from matplotlib import pyplot as plt
 import pdb
 import numpy as np
 
-env = Level_BossLevelNoUnlock()
+env = Level_UnlockLocalDist()
 env.reset()
 for i in range(10):
     env.step(1)
