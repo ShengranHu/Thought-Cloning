@@ -83,6 +83,7 @@ parser.add_argument("--expr-group-name", default="", help="expr group name")
 parser.add_argument(
     "--stop-tf", type=int, default=10, help="after N epochs stop teacher forcing"
 )
+parser.add_argument("--wandb-id", help="log name for WandB")
 
 
 def main(args):

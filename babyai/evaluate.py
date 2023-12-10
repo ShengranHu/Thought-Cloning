@@ -199,6 +199,7 @@ def TC_batch_evaluate(
             if return_obss_actions:
                 subgoal = results["subgoal"]
                 frames = env.render("rgb_array", tile_size=32)
+                # pdb.set_trace()
                 for i in range(num_envs):
                     if not already_done[i]:
                         obss[i].append(many_obs[i])

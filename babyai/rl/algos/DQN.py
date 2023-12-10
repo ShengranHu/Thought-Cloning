@@ -17,6 +17,7 @@ class DQN(nn.Module):
         critic_optimizer,
         use_double_q: bool = False,
         clip_grad_norm: Optional[float] = None,
+        loss=nn.MSELoss(),
     ):
         super().__init__()
 
@@ -26,7 +27,7 @@ class DQN(nn.Module):
         self.use_double_q = use_double_q
         self.critic_optimizer = critic_optimizer
 
-        self.critic_loss = nn.MSELoss()
+        self.critic_loss = loss
 
     def compute_critic_loss(
         self,

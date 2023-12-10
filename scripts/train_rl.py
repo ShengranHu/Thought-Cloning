@@ -16,7 +16,7 @@ import logging
 import torch
 from babyai.arguments import ArgumentParser
 import babyai.utils as utils
-from babyai.thought_cloning import OfflineLearning
+from babyai.thought_cloning import OfflineLearning, OfflineLanguageLearning
 import pdb
 
 # Parse arguments
@@ -83,6 +83,8 @@ parser.add_argument("--expr-group-name", default="", help="expr group name")
 parser.add_argument(
     "--target-update-period", default=16, help="how many steps before updating target"
 )
+parser.add_argument("--language", action="store_true")
+parser.add_argument("--wandb-id", help="log name for WandB")
 
 
 def main(args):
@@ -96,11 +98,14 @@ def main(args):
 
     utils.group_name = args.expr_group_name
 
-    args.model = args.model or OfflineLearning.default_model_name(args)
+    if args.language:
+        args.model = args.model or OfflineLanguageLearning.default_model_name(args)
+    else:
+        args.model = args.model or OfflineLearning.default_model_name(args)
     utils.configure_logging(args.model)
     logger = logging.getLogger(__name__)
 
-    rl_learn = OfflineLearning(args)
+    rl_learn = OfflineLanguageLearning(args) if args.language else OfflineLearning(args)
 
     # Define logger and Tensorboard writer
     header = [

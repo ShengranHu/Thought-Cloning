@@ -669,7 +669,7 @@ class ThoughCloningModel(nn.Module, babyai.rl.RecurrentACModel):
             "extra_predictions": dict(),
         }
 
-    def rl_forward(self, obs, memory, instr_embedding=None):
+    def rl_forward(self, obs, memory, instr_embedding=None, lower_only=False):
         if instr_embedding == None:
             instr_embedding = self._get_instr_embedding(obs.instr)
 
@@ -683,16 +683,29 @@ class ThoughCloningModel(nn.Module, babyai.rl.RecurrentACModel):
         upper_memory = memory[:, 0, :]
         lower_memory = memory[:, 1, :]
         subgoal_histories = memory[:, 2, :]
-        logProbs, subgoal, upper_memory = self.upper_level_policy.forward(
-            visual_embedding,
-            upper_memory,
-            instr_embedding,
-            obs.instr,
-            subgoal_histories,
-            teacher_forcing=0,
-            gt_subgoal=gt_subgoal,
-            gt_subgoal_embedding=gt_subgoal_embedding,
-        )
+        if lower_only:
+            with torch.no_grad():
+                logProbs, subgoal, upper_memory = self.upper_level_policy.forward(
+                    visual_embedding,
+                    upper_memory,
+                    instr_embedding,
+                    obs.instr,
+                    subgoal_histories,
+                    teacher_forcing=0,
+                    gt_subgoal=gt_subgoal,
+                    gt_subgoal_embedding=gt_subgoal_embedding,
+                )
+        else:
+            logProbs, subgoal, upper_memory = self.upper_level_policy.forward(
+                visual_embedding,
+                upper_memory,
+                instr_embedding,
+                obs.instr,
+                subgoal_histories,
+                teacher_forcing=0,
+                gt_subgoal=gt_subgoal,
+                gt_subgoal_embedding=gt_subgoal_embedding,
+            )
         # encode subgoal
         subgoal_embedding = self.obs_embedding.get_language_embedding(
             subgoal, is_subgoal=True
@@ -731,10 +744,12 @@ class ThoughCloningModel(nn.Module, babyai.rl.RecurrentACModel):
         # handle memory
         memory = torch.stack((upper_memory, lower_memory, subgoal_histories), dim=1)
 
+        # pdb.set_trace()
         return {
             "memory": memory,
             "dist": dist,
             "subgoal": gt_subgoal,
             "predicted_subgoal": subgoal,
             "value": value,
+            "logProbs": logProbs,
         }

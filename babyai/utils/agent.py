@@ -5,6 +5,7 @@ from babyai.bot import Bot
 from babyai.model import ACModel
 from random import Random
 import numpy as np
+import pdb
 
 
 class Agent(ABC):
