@@ -206,7 +206,7 @@ class ImitationLearning(object):
         if torch.cuda.is_available():
             self.acmodel.to(self.device)
             logger.info("send model to {}".format(self.device))
-        
+
         wandb.init(project="Thought-Cloning", name=args.wandb_id)
         wandb.watch(self.acmodel, log_freq=100)
 
@@ -461,7 +461,9 @@ class ImitationLearning(object):
             if not getattr(self.args, "multi_env", None)
             else self.args.multi_env
         ):
-            logs += [TC_batch_evaluate(agent, env_name, self.val_seed, episodes, True, False)]
+            logs += [
+                TC_batch_evaluate(agent, env_name, self.val_seed, episodes, True, False)
+            ]
             self.val_seed += episodes
         episode_vis = np.random.choice(len(logs[0]["visualization_per_episode"]))
         episode_vis = np.array(logs[0]["visualization_per_episode"][episode_vis])
@@ -901,21 +903,6 @@ class OfflineLearning(object):
             flat_batch[:, 2],
             flat_batch[:, 3],
         )
-        next_obss = obss[1:].copy()
-        next_obss = np.concatenate(
-            [
-                next_obss,
-                [
-                    {
-                        "image": np.zeros_like(obss[0]["image"]),
-                        "direction": 0,
-                        "mission": "task complete",
-                        "subgoal": "none",
-                        "is_new_sg": False,
-                    }
-                ],
-            ]
-        )
         action_true = torch.tensor(
             [action for action in action_true], device=self.device, dtype=torch.long
         )
@@ -939,11 +926,9 @@ class OfflineLearning(object):
         while True:
             # taking observations and done located at inds
             obs = obss[inds]
-            next_obs = next_obss[inds]
             done_step = done[inds]
             reward_step = rewards[inds]
             preprocessed_obs = self.obss_preprocessor(obs, device=self.device)
-            preprocessed_next_obs = self.obss_preprocessor(next_obs, device=self.device)
             with torch.no_grad():
                 # taking the memory till len(inds), as demos beyond that have already finished
                 new_memory = self.acmodel.train_forward(
@@ -967,19 +952,18 @@ class OfflineLearning(object):
 
         # Here, actual backprop upto args.recurrence happens
         final_loss = 0
-        final_entropy, final_policy_loss, final_value_loss, final_sg_loss = 0, 0, 0, 0
 
         indexes = self.starting_indexes(num_frames)
         memory = memories[indexes]
-        accuracy = 0
-        total_frames = len(indexes) * self.args.recurrence
 
         scaler = torch.cuda.amp.GradScaler()
+        prev_results = None
+        prev_done = None
+        prev_reward = None
+        prev_action = None
         for _ in range(self.args.recurrence):
             obs = obss[indexes]
-            next_obs = obss[indexes]
             preprocessed_obs = self.obss_preprocessor(obs, device=self.device)
-            preprocessed_next_obs = self.obss_preprocessor(next_obs, device=self.device)
             action_step = action_true[indexes]
             reward_step = rewards[indexes]
             mask_step = mask[indexes]
@@ -989,38 +973,46 @@ class OfflineLearning(object):
                     preprocessed_obs,
                     memory * mask_step,
                     instr_embedding=instr_embedding[episode_ids[indexes]],
+                    lower_only=self.args.lower_only,
                 )
                 with torch.no_grad():
-                    next_results = self.acmodel.rl_forward(
-                        preprocessed_next_obs,
+                    target_results = self.target.rl_forward(
+                        preprocessed_obs,
                         memory * mask_step,
                         instr_embedding=instr_embedding[episode_ids[indexes]],
+                        lower_only=self.args.lower_only,
                     )
-                    target_next = self.target.rl_forward(
-                        preprocessed_next_obs,
-                        memory * mask_step,
-                        instr_embedding=instr_embedding[episode_ids[indexes]],
-                    )
+                if prev_results is None:
+                    prev_results = model_results
+                    prev_done = done_rl
+                    prev_reward = reward_step
+                    continue
+                else:
+                    # pdb.set_trace()
+                    dist = prev_results["dist"]
+                    next_qa = target_results["value"]
+                    qa = prev_results["value"]
 
-                # pdb.set_trace()
-                dist = model_results["dist"]
-                (critic_l, actor_l), rst = self.rl_algo.update(
-                    model_results["value"],
-                    action_step,
-                    torch.from_numpy(reward_step.astype("float16")).to(self.device),
-                    target_next["value"],
-                    torch.from_numpy(done_rl.astype("bool")).to(self.device),
-                    dist,
-                )
-                # entropy = dist.entropy().mean()
-                # final_loss -= entropy * 0.01
-                final_loss += critic_l
-                final_loss += actor_l
-                # final_loss += maskedNll(
-                #     model_results["logProbs"], preprocessed_obs.subgoal
-                # )
-                log.append(rst)
-                wandb.log(rst)
+                    (critic_l, actor_l), rst = self.rl_algo.update(
+                        qa,
+                        action_step,
+                        torch.from_numpy(prev_reward.astype("float16")).to(self.device),
+                        next_qa,
+                        torch.from_numpy(prev_done.astype("bool")).to(self.device),
+                        dist,
+                    )
+                    # entropy = dist.entropy().mean()
+                    # final_loss -= entropy * 0.01
+                    final_loss += critic_l
+                    final_loss += actor_l
+                    # final_loss += maskedNll(
+                    #     model_results["logProbs"], preprocessed_obs.subgoal
+                    # )
+                    log.append(rst)
+                    wandb.log(rst)
+                    prev_results = model_results
+                    prev_done = done_rl
+                    prev_reward = reward_step
             indexes += 1
 
         self.optimizer.zero_grad()

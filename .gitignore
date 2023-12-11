@@ -141,3 +141,4 @@ zeroshot_baseline_noisy.csv
 zeroshot_baseline.csv
 wandb/
 LOG*/
+*.csv

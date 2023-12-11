@@ -2,10 +2,13 @@ import os
 import torch
 
 from .. import utils
+import pdb
 
 
 def get_model_dir(model_name):
-    return os.path.join(utils.storage_dir(), utils.expr_group_name(), "models", model_name)
+    return os.path.join(
+        utils.storage_dir(), utils.expr_group_name(), "models", model_name
+    )
 
 
 def get_model_path(model_name):
@@ -14,6 +17,7 @@ def get_model_path(model_name):
 
 def load_model(model_name, raise_not_found=True):
     path = get_model_path(model_name)
+    # pdb.set_trace()
     try:
         if torch.cuda.is_available():
             model = torch.load(path)

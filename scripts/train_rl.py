@@ -81,9 +81,13 @@ parser.add_argument(
 )
 parser.add_argument("--expr-group-name", default="", help="expr group name")
 parser.add_argument(
-    "--target-update-period", default=16, help="how many steps before updating target"
+    "--target-update-period",
+    default=16,
+    type=int,
+    help="how many steps before updating target",
 )
 parser.add_argument("--language", action="store_true")
+parser.add_argument("--lower-only", action="store_true")
 parser.add_argument("--wandb-id", help="log name for WandB")
 
 

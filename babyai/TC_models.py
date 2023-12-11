@@ -683,29 +683,16 @@ class ThoughCloningModel(nn.Module, babyai.rl.RecurrentACModel):
         upper_memory = memory[:, 0, :]
         lower_memory = memory[:, 1, :]
         subgoal_histories = memory[:, 2, :]
-        if lower_only:
-            with torch.no_grad():
-                logProbs, subgoal, upper_memory = self.upper_level_policy.forward(
-                    visual_embedding,
-                    upper_memory,
-                    instr_embedding,
-                    obs.instr,
-                    subgoal_histories,
-                    teacher_forcing=0,
-                    gt_subgoal=gt_subgoal,
-                    gt_subgoal_embedding=gt_subgoal_embedding,
-                )
-        else:
-            logProbs, subgoal, upper_memory = self.upper_level_policy.forward(
-                visual_embedding,
-                upper_memory,
-                instr_embedding,
-                obs.instr,
-                subgoal_histories,
-                teacher_forcing=0,
-                gt_subgoal=gt_subgoal,
-                gt_subgoal_embedding=gt_subgoal_embedding,
-            )
+        logProbs, subgoal, upper_memory = self.upper_level_policy.forward(
+            visual_embedding,
+            upper_memory,
+            instr_embedding,
+            obs.instr,
+            subgoal_histories,
+            teacher_forcing=0,
+            gt_subgoal=gt_subgoal,
+            gt_subgoal_embedding=gt_subgoal_embedding,
+        )
         # encode subgoal
         subgoal_embedding = self.obs_embedding.get_language_embedding(
             subgoal, is_subgoal=True
@@ -730,6 +717,13 @@ class ThoughCloningModel(nn.Module, babyai.rl.RecurrentACModel):
             next_subgoal_history.squeeze(1), hidden
         )
         subgoal_histories = torch.cat(hidden, dim=1)
+        if lower_only:
+            visual_embedding = visual_embedding.detach().clone()
+            lower_memory = lower_memory.detach().clone()
+            subgoal = subgoal.detach().clone()
+            subgoal_embedding = subgoal_embedding.detach().clone()
+            obs.instr = obs.instr.detach().clone()
+            instr_embedding = instr_embedding.detach().clone()
 
         # lower level
         dist, value, lower_memory = self.lower_level_policy.forward(
