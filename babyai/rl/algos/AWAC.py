@@ -57,6 +57,7 @@ class AWAC(DQN):
         self,
         qa_values: torch.Tensor,
         actions: torch.Tensor,
+        values: torch.Tensor = None,
         action_dist: Optional[torch.distributions.Categorical] = None,
     ):
         # TODO(student): compute the advantage of the actions compared to E[Q(s, a)]
@@ -72,14 +73,11 @@ class AWAC(DQN):
         qa_values: torch.Tensor,
         actor_dist: torch.distributions.Distribution,
         actions: torch.Tensor,
+        values=None,
     ):
         # TODO(student): update the actor using AWAC
-        adv = self.compute_advantage(qa_values, actions)
-        loss = (
-            -actor_dist.log_prob(actions)
-            * torch.exp(adv / self.temperature)
-            * self.temperature
-        )
+        adv = self.compute_advantage(qa_values, actions, values)
+        loss = -actor_dist.log_prob(actions) * torch.exp(adv / self.temperature)
         loss = loss.mean()
         return loss
 
@@ -103,8 +101,9 @@ class AWAC(DQN):
         # Update the actor.
         actor_loss = self.update_actor(qa_values, actor_dist, actions)
         metrics["actor_loss"] = actor_loss
+        metrics["critic_loss"] = critic_loss
 
-        return (critic_loss, actor_loss), metrics
+        return metrics
 
 
 class LAWAC(DQN):
@@ -158,6 +157,7 @@ class LAWAC(DQN):
         self,
         qa_values: torch.Tensor,
         actions: torch.Tensor,
+        values=None,
         action_dist: Optional[torch.distributions.Categorical] = None,
     ):
         # TODO(student): compute the advantage of the actions compared to E[Q(s, a)]
@@ -172,10 +172,11 @@ class LAWAC(DQN):
         self,
         qa_values: torch.Tensor,
         actor_dist: torch.distributions.Distribution,
+        values: torch.Tensor,
         actions: torch.Tensor,
     ):
         # TODO(student): update the actor using AWAC
-        adv = self.compute_advantage(qa_values, actions)
+        adv = self.compute_advantage(qa_values, actions, values)
         loss = (
             -actor_dist.log_prob(actions)
             * torch.exp(adv / self.temperature)
@@ -204,5 +205,6 @@ class LAWAC(DQN):
         # Update the actor.
         actor_loss = self.update_actor(qa_values, actor_dist, actions)
         metrics["actor_loss"] = actor_loss
+        metrics["critic_loss"] = critic_loss
 
-        return (critic_loss, actor_loss), metrics
+        return metrics

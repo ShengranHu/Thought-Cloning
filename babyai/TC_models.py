@@ -345,7 +345,12 @@ class LowerLevel(nn.Module):
 
         # Define critic's model
         self.critic = nn.Sequential(
-            nn.Linear(self.embedding_size, 64), nn.Tanh(), nn.Linear(64, action_space.n)
+            nn.Linear(self.embedding_size, 64),
+            nn.LeakyReLU(),
+            nn.Linear(64, action_space.n),
+        )
+        self.value_critic = nn.Sequential(
+            nn.Linear(self.embedding_size, 64), nn.LeakyReLU(), nn.Linear(64, 1)
         )
 
         # Initialize parameters correctly
@@ -413,10 +418,72 @@ class LowerLevel(nn.Module):
         y = self.actor(embedding)
         dist = Categorical(logits=F.log_softmax(y, dim=1))
 
-        z = self.critic(embedding)
+        z = self.value_critic(embedding)
         value = z.squeeze(1)
 
         return dist, value, memory
+
+    def rl_forward(
+        self,
+        visual_embedding,
+        memory,
+        subgoal,
+        subgoal_embedding,
+        instr,
+        instr_embedding,
+    ):
+        # atten subgoal with memory
+        mask = (subgoal == 0).unsqueeze(1)
+        mask = mask[:, :, : subgoal_embedding.shape[1]]
+        subgoal_embedding = subgoal_embedding[:, : mask.shape[2], :]
+
+        keys = self.memory2key_sg(memory).unsqueeze(1)
+        subgoal_embedding, attn = self.attention(
+            keys, subgoal_embedding, subgoal_embedding, mask
+        )
+
+        # atten instr with memory
+        mask = (instr == 0).unsqueeze(1)
+        mask = mask[:, :, : instr_embedding.shape[1]]
+        instr_embedding = instr_embedding[:, : mask.shape[2], :]
+
+        keys = self.memory2key_instr(memory).unsqueeze(1)
+        instr_embedding, attn = self.attention(
+            keys, instr_embedding, instr_embedding, mask
+        )
+
+        language_embedding = (
+            self.sg_linear(subgoal_embedding) + self.instr_linear(instr_embedding)
+        ).squeeze(1)
+
+        x = visual_embedding
+
+        for controller in self.controllers:
+            out = controller(x, language_embedding)
+            # residual
+            x = x + out
+
+        x = F.relu(self.film_pool(x))
+        x = x.reshape(x.shape[0], -1)
+
+        hidden = (
+            memory[:, : self.semi_memory_size],
+            memory[:, self.semi_memory_size :],
+        )
+        hidden = self.memory_rnn(x, hidden)
+        embedding = hidden[0]
+        memory = torch.cat(hidden, dim=1)
+
+        y = self.actor(embedding)
+        dist = Categorical(logits=F.log_softmax(y, dim=1))
+
+        z = self.critic(embedding)
+        qa = z.squeeze(1)
+
+        a = self.value_critic(embedding)
+        value = a.squeeze(1)
+
+        return dist, qa, value, memory
 
 
 class ThoughCloningModel(nn.Module, babyai.rl.RecurrentACModel):
@@ -726,7 +793,7 @@ class ThoughCloningModel(nn.Module, babyai.rl.RecurrentACModel):
             instr_embedding = instr_embedding.detach().clone()
 
         # lower level
-        dist, value, lower_memory = self.lower_level_policy.forward(
+        dist, qa, value, lower_memory = self.lower_level_policy.rl_forward(
             visual_embedding,
             lower_memory,
             subgoal,
@@ -745,5 +812,6 @@ class ThoughCloningModel(nn.Module, babyai.rl.RecurrentACModel):
             "subgoal": gt_subgoal,
             "predicted_subgoal": subgoal,
             "value": value,
+            "qa": qa,
             "logProbs": logProbs,
         }

@@ -290,15 +290,22 @@ def load_agent(
     argmax=False,
     env_name=None,
     TC=False,
+    is_critic=False,
 ):
     # env_name needs to be specified for demo agents
     if model_name == "BOT":
         return BotAgent(env)
     elif model_name is not None and TC:
-        obss_preprocessor = utils.TCObssPreprocessor(
-            model_name, obs_space=env.observation_space
-        )
-        return TCModelAgent(model_name, obss_preprocessor, argmax)
+        if is_critic:
+            obss_preprocessor = utils.TCObssPreprocessor(
+                model_name, obs_space=env.observation_space
+            )
+            return TCCriticAgent(model_name, obss_preprocessor, argmax)
+        else:
+            obss_preprocessor = utils.TCObssPreprocessor(
+                model_name, obs_space=env.observation_space
+            )
+            return TCModelAgent(model_name, obss_preprocessor, argmax)
     elif model_name is not None:
         obss_preprocessor = utils.ObssPreprocessor(model_name, env.observation_space)
         return ModelAgent(model_name, obss_preprocessor, argmax)

@@ -15,24 +15,23 @@ class IQL(AWAC):
         self,
         qa_values: torch.Tensor,
         actions: torch.Tensor,
+        values: torch.Tensor,
         action_dist: Optional[torch.distributions.Categorical] = None,
     ):
         # TODO(student): Compute advantage with IQL
 
         # qa_values = self.target_critic(observations)
-        qa_values = self.critic(observations)
         q_values = qa_values.gather(1, actions.unsqueeze(1)).squeeze(-1)
-        values = self.value_critic(observations).squeeze(-1)
-
         advantages = q_values - values
         return advantages
 
     def update_q(
         self,
-        observations: torch.Tensor,
+        qa_values: torch.Tensor,
         actions: torch.Tensor,
         rewards: torch.Tensor,
-        next_observations: torch.Tensor,
+        next_qa_values: torch.Tensor,
+        next_values: torch.Tensor,
         dones: torch.Tensor,
     ) -> dict:
         """
@@ -40,30 +39,18 @@ class IQL(AWAC):
         """
         # TODO(student): Update Q(s, a) to match targets (based on V)
         with torch.no_grad():
-            target_values = rewards + self.discount * self.target_value_critic(
-                next_observations
-            ).squeeze(-1) * (1 - dones.float())
-            # trying = self.target_value_critic(next_observations)
-            # print(rewards.shape, trying.shape, ((1-dones.float()).unsqueeze(1)).shape)
-
-        # qa_values = self.target_critic(observations)
-        qa_values = self.critic(observations)
+            target_values = rewards + self.discount * next_values.squeeze(-1) * (
+                1 - dones.float()
+            )
         q_values = qa_values.gather(1, actions.unsqueeze(1)).squeeze(-1)
         # print(q_values.shape, target_values.shape)
         loss = self.critic_loss(q_values, target_values)
 
-        self.critic_optimizer.zero_grad()
-        loss.backward()
-        grad_norm = torch.nn.utils.clip_grad.clip_grad_norm_(
-            self.critic.parameters(), self.clip_grad_norm or float("inf")
-        )
-        self.critic_optimizer.step()
-
         metrics = {
+            "critic_loss": loss,
             "q_loss": self.critic_loss(q_values, target_values).item(),
             "q_values": q_values.mean().item(),
             "target_values": target_values.mean().item(),
-            "q_grad_norm": grad_norm.item(),
         }
 
         return metrics
@@ -84,7 +71,8 @@ class IQL(AWAC):
 
     def update_v(
         self,
-        observations: torch.Tensor,
+        qa_values: torch.Tensor,
+        values: torch.Tensor,
         actions: torch.Tensor,
     ):
         """
@@ -92,37 +80,29 @@ class IQL(AWAC):
         """
         # TODO(student): Compute target values for V(s)
 
-        qa_values = self.target_critic(observations)
         # qa_values = self.critic(observations)
         q_values = qa_values.gather(1, actions.unsqueeze(1)).squeeze(-1)
         target_values = q_values
         # TODO(student): Update V(s) using the loss from the IQL paper
 
-        vs = self.value_critic(observations).squeeze(-1)
-
-        loss = self.iql_expectile_loss(self.expectile, vs, q_values).mean()
-
-        self.value_critic_optimizer.zero_grad()
-        loss.backward()
-        grad_norm = torch.nn.utils.clip_grad.clip_grad_norm_(
-            self.value_critic.parameters(), self.clip_grad_norm or float("inf")
-        )
-        self.value_critic_optimizer.step()
+        loss = self.iql_expectile_loss(self.expectile, values, q_values).mean()
 
         return {
+            "value_loss": loss,
             "v_loss": loss.item(),
-            "vs_adv": (vs - target_values).mean().item(),
-            "vs": vs.mean().item(),
+            "vs_adv": (values - target_values).mean().item(),
+            "vs": values.mean().item(),
             "target_values": target_values.mean().item(),
-            "v_grad_norm": grad_norm.item(),
         }
 
     def update_critic(
         self,
-        observations: torch.Tensor,
+        qa_values: torch.Tensor,
+        values: torch.Tensor,
         actions: torch.Tensor,
         rewards: torch.Tensor,
-        next_observations: torch.Tensor,
+        next_qa_values: torch.Tensor,
+        next_values: torch.Tensor,
         dones: torch.Tensor,
     ) -> dict:
         """
@@ -130,29 +110,29 @@ class IQL(AWAC):
         """
 
         metrics_q = self.update_q(
-            observations, actions, rewards, next_observations, dones
+            qa_values, actions, rewards, next_qa_values, next_values, dones
         )
-        metrics_v = self.update_v(observations, actions)
+        metrics_v = self.update_v(qa_values, values, actions)
 
         return {**metrics_q, **metrics_v}
 
     def update(
         self,
-        observations: torch.Tensor,
+        qa_values: torch.Tensor,
+        values: torch.Tensor,
         actions: torch.Tensor,
+        action_dist,
         rewards: torch.Tensor,
-        next_observations: torch.Tensor,
+        next_qa_values: torch.Tensor,
+        next_values: torch.Tensor,
         dones: torch.Tensor,
-        step: int,
     ):
         metrics = self.update_critic(
-            observations, actions, rewards, next_observations, dones
+            qa_values, values, actions, rewards, next_qa_values, next_values, dones
         )
-        metrics["actor_loss"] = self.update_actor(observations, actions)
-
-        if step % self.target_update_period == 0:
-            self.update_target_critic()
-            self.update_target_value_critic()
+        metrics["actor_loss"] = self.update_actor(
+            qa_values, action_dist, actions, values
+        )
 
         return metrics
 

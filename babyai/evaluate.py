@@ -156,7 +156,12 @@ def batch_evaluate(
 
 # Returns the performance of the agent on the environment for a particular number of episodes.
 def TC_batch_evaluate(
-    agent, env_name, seed, episodes, return_obss_actions=False, pixel=False
+    agent,
+    env_name,
+    seed,
+    episodes,
+    return_obss_actions=False,
+    pixel=False,
 ):
     num_envs = min(4, episodes)
     # print("using default evalutaion: 512 many envs + no decode subgoal + no.cpu()")

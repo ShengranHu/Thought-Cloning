@@ -16,6 +16,7 @@ from babyai.rl import DictList
 from babyai.TC_models import ThoughCloningModel
 from babyai.rl.algos.DQN import DQN
 from babyai.rl.algos.AWAC import AWAC
+from babyai.rl.algos.IQL import IQL
 from babyai.submodules import maskedNll
 import multiprocessing
 import os
@@ -23,6 +24,7 @@ import json
 import logging
 import gc
 from tqdm import tqdm
+import copy
 import pdb
 
 logger = logging.getLogger(__name__)
@@ -612,6 +614,9 @@ class ImitationLearning(object):
 
                 val_log = self.run_epoch_recurrence(self.val_demos)
                 validation_accuracy = np.mean(val_log["accuracy"])
+                wandb.log(
+                    {"Average Return": mean_return[0], "Success Rate": success_rate[0]}
+                )
 
                 if status["i"] % self.args.log_interval == 0:
                     validation_data = [validation_accuracy] + mean_return + success_rate
@@ -778,20 +783,48 @@ class OfflineLearning(object):
 
         self.acmodel.train()
 
-        self.optimizer = torch.optim.Adam(
-            self.acmodel.parameters(), self.args.lr, eps=self.args.optim_eps
-        )
+        if self.args.lower_only:
+            self.optimizer = torch.optim.Adam(
+                list(self.acmodel.lower_level_policy.critic.parameters())
+                + list(self.acmodel.lower_level_policy.value_critic.parameters()),
+                self.args.lr,
+                eps=self.args.optim_eps,
+            )
+            num_param = sum(
+                p.numel() for p in self.acmodel.lower_level_policy.parameters()
+            )
+            print(f"Optimizing LOWER ONLY {num_param} params")
+        else:
+            self.optimizer = torch.optim.Adam(
+                self.acmodel.parameters(), self.args.lr, eps=self.args.optim_eps
+            )
+            num_param = sum(p.numel() for p in self.acmodel.parameters())
+            print(f"Optimizing {num_param} params")
         self.teacher_forcing_ratio = 1
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+        # self.rl_algo = DQN(
+        #     discount=0.9,
+        #     target_update_period=256,
+        #     critic_optimizer=self.optimizer,
+        #     use_double_q=True,
+        # )
         self.rl_algo = AWAC(
-            0.1,
+            temperature=1,
             discount=0.99,
             target_update_period=256,
             critic_optimizer=self.optimizer,
             use_double_q=True,
         )
+        # self.rl_algo = IQL(
+        #     expectile=0.1,
+        #     temperature=1,
+        #     discount=0.99,
+        #     target_update_period=256,
+        #     critic_optimizer=self.optimizer,
+        #     use_double_q=False,
+        # )
         self.step = 0
         self.target = ThoughCloningModel(
             self.obss_preprocessor.obs_space,
@@ -851,17 +884,19 @@ class OfflineLearning(object):
         for batch_index in tqdm(range(len(indices) // batch_size)):
             if self.step % self.args.target_update_period == 0:
                 print("Updating target")
-                self.target.load_state_dict(self.acmodel.state_dict())
+                self.target.load_state_dict(self.acmodel.state_dict(), strict=False)
+            # if self.step == 0:
+            #     self.acmodel = copy.deepcopy(self.target)
             batch = [demos[i] for i in indices[offset : offset + batch_size]]
             frames += sum([len(demo[3]) for demo in batch])
 
-            try:
-                self.run_epoch_recurrence_one_batch(batch, is_training=is_training)
-                self.step += 1
-            except Exception as e:
-                print(e)
-                gc.collect()
-                torch.cuda.empty_cache()
+            # try:
+            self.run_epoch_recurrence_one_batch(batch, is_training=is_training)
+            self.step += 1
+            # except Exception as e:
+            #     print(e)
+            #     gc.collect()
+            #     torch.cuda.empty_cache()
 
             offset += batch_size
 
@@ -986,30 +1021,52 @@ class OfflineLearning(object):
                     prev_results = model_results
                     prev_done = done_rl
                     prev_reward = reward_step
+                    prev_action = action_step
                     continue
                 else:
                     # pdb.set_trace()
                     dist = prev_results["dist"]
-                    next_qa = target_results["value"]
-                    qa = prev_results["value"]
+                    value = prev_results["value"]
+                    next_value = target_results["value"]
+                    next_qa = target_results["qa"]
+                    qa = prev_results["qa"]
 
-                    (critic_l, actor_l), rst = self.rl_algo.update(
+                    # metrics = self.rl_algo.update(
+                    #     qa,
+                    #     value,
+                    #     prev_action,
+                    #     dist,
+                    #     torch.from_numpy(prev_reward.astype("float16")).to(self.device),
+                    #     next_qa,
+                    #     next_value,
+                    #     torch.from_numpy(prev_done.astype("bool")).to(self.device),
+                    # )
+                    metrics = self.rl_algo.update(
                         qa,
-                        action_step,
+                        prev_action,
                         torch.from_numpy(prev_reward.astype("float16")).to(self.device),
                         next_qa,
                         torch.from_numpy(prev_done.astype("bool")).to(self.device),
                         dist,
                     )
-                    # entropy = dist.entropy().mean()
-                    # final_loss -= entropy * 0.01
+                    # metrics = self.rl_algo.update(
+                    #     qa,
+                    #     prev_action,
+                    #     torch.from_numpy(prev_reward.astype("float16")).to(self.device),
+                    #     next_qa,
+                    #     torch.from_numpy(prev_done.astype("bool")).to(self.device),
+                    #     dist,
+                    # )
+                    critic_l = metrics["critic_loss"]
+                    actor_l = metrics["actor_loss"]
+                    # value_loss = metrics["value_loss"]
+
                     final_loss += critic_l
                     final_loss += actor_l
-                    # final_loss += maskedNll(
-                    #     model_results["logProbs"], preprocessed_obs.subgoal
-                    # )
-                    log.append(rst)
-                    wandb.log(rst)
+                    # final_loss += value_loss
+
+                    log.append(metrics)
+                    wandb.log(metrics)
                     prev_results = model_results
                     prev_done = done_rl
                     prev_reward = reward_step
@@ -1018,8 +1075,9 @@ class OfflineLearning(object):
         self.optimizer.zero_grad()
         scaler.scale(final_loss).backward()
         grad_norm = torch.nn.utils.clip_grad.clip_grad_norm_(
-            self.acmodel.parameters(), 1, norm_type=2
+            self.acmodel.lower_level_policy.parameters(), 1, norm_type="inf"
         )
+        wandb.log({"Grad Norm": grad_norm})
         # final_loss.backward()
         scaler.step(self.optimizer)
         # self.optimizer.step()
@@ -1051,7 +1109,14 @@ class OfflineLearning(object):
             else self.args.multi_env
         ):
             logs += [
-                TC_batch_evaluate(agent, env_name, self.val_seed, episodes, True, False)
+                TC_batch_evaluate(
+                    agent,
+                    env_name,
+                    self.val_seed,
+                    episodes,
+                    True,
+                    False,
+                )
             ]
             self.val_seed += episodes
         # pdb.set_trace()
@@ -1307,7 +1372,9 @@ class OfflineLanguageLearning(object):
         self.acmodel.train()
 
         self.optimizer = torch.optim.Adam(
-            self.acmodel.parameters(), self.args.lr, eps=self.args.optim_eps
+            self.acmodel.lower_level_policy.parameters(),
+            self.args.lr,
+            eps=self.args.optim_eps,
         )
         self.teacher_forcing_ratio = 1
 
