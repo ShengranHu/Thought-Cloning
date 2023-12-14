@@ -14,15 +14,17 @@ def get_vocab_path(model_name):
 
 
 class Vocabulary:
-    def __init__(self, model_name):
-        self.path = get_vocab_path(model_name)
+    def __init__(self, model_name,ppo_warmstart=False):
+        if ppo_warmstart:
+            self.path = model_name[:model_name.rfind('/')] + '/vocab.json'
+        else:
+            self.path = get_vocab_path(model_name)
         self.max_size = 100
         self.startToken = 0
         self.endToken = 1
         self.startString = "sos"
         self.endString = "eos"
-
-        if os.path.exists(self.path):
+        if os.path.exists(self.path) or os.path.exists(self.path[self.path.find('/+1'):]):
             self.vocab = json.load(open(self.path))
         else:
             self.vocab = {
@@ -85,12 +87,13 @@ class InstructionsPreprocessor(object):
 
 
 class UnifiedLanguagePreprocessor(object):
-    def __init__(self, model_name, load_vocab_from=None):
+    def __init__(self, model_name, load_vocab_from=None,ppo_warmstart=False):
         self.model_name = model_name
-        self.vocab = Vocabulary(model_name)
+        self.vocab = Vocabulary(model_name,ppo_warmstart=ppo_warmstart)
 
         self.cache = {}
-
+        if ppo_warmstart:
+            return
         path = get_vocab_path(model_name)
         if not os.path.exists(path) and load_vocab_from is not None:
             # self.vocab.vocab should be an empty dict
@@ -191,9 +194,9 @@ class IntImagePreprocessor(object):
 
 
 class TCObssPreprocessor:
-    def __init__(self, model_name, obs_space=None, load_vocab_from=None):
+    def __init__(self, model_name, obs_space=None, load_vocab_from=None,ppo_warmstart=False):
         self.image_preproc = RawImagePreprocessor()
-        self.language_preproc = UnifiedLanguagePreprocessor(model_name, load_vocab_from)
+        self.language_preproc = UnifiedLanguagePreprocessor(model_name, load_vocab_from,ppo_warmstart=ppo_warmstart)
         self.vocab = self.language_preproc.vocab
         self.obs_space = {"image": 147, "instr": self.vocab.max_size}
         self.index2word = {index: word for word, index in self.vocab.vocab.items()}

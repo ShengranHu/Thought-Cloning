@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
 import torch
 import numpy
-
+import numpy as np
+import re
 from babyai.rl.format import default_preprocess_obss
 from babyai.rl.utils import DictList, ParallelEnv
 from babyai.rl.utils.supervised_losses import ExtraInfoCollector
@@ -107,6 +108,29 @@ class BaseAlgo(ABC):
         self.log_reshaped_return = [0] * self.num_procs
         self.log_num_frames = [0] * self.num_procs
 
+    def convert_obs(self,obss,device):
+        raw_instrs = []
+        max_instr_len = 0
+        preprocessed_obs = DictList()
+        
+        images = np.array([obs["image"] for obs in obss])
+        images = torch.tensor(images, device=device, dtype=torch.float)
+        for obs in obss:
+            tokens = re.findall("([a-z]+)", obs["mission"].lower())
+            instr = numpy.array([self.vocab[token] for token in tokens])
+
+            raw_instrs.append(instr)
+            max_instr_len = max(len(instr), max_instr_len)
+
+        instrs = numpy.zeros((len(obss), max_instr_len))
+
+        for i, instr in enumerate(raw_instrs):
+            instrs[i, : len(instr)] = instr
+        overall_goals = torch.tensor(instrs, device=device, dtype=torch.long)
+        preprocessed_obs.image = images
+        preprocessed_obs.instr = overall_goals
+        return preprocessed_obs
+    
     def collect_experiences(self):
         """Collects rollouts and computes advantages.
 
@@ -128,10 +152,10 @@ class BaseAlgo(ABC):
             reward, policy loss, value loss, etc.
 
         """
+        self.obs = self.env.reset()
         for i in range(self.num_frames_per_proc):
             # Do one agent-environment interaction
-
-            preprocessed_obs = self.preprocess_obss(self.obs, device=self.device)
+            preprocessed_obs = self.convert_obs(self.obs,self.device)
             with torch.no_grad():
                 model_results = self.acmodel(preprocessed_obs, self.memory * self.mask.view(-1,1,1))
                 dist = model_results['dist']
@@ -140,6 +164,7 @@ class BaseAlgo(ABC):
                 extra_predictions = model_results['extra_predictions']
 
             action = dist.sample()
+            action = action.detach()
 
             obs, reward, done, env_info = self.env.step(action.cpu().numpy())
             if self.aux_info:
@@ -165,7 +190,7 @@ class BaseAlgo(ABC):
                 ], device=self.device)
             else:
                 self.rewards[i] = torch.tensor(reward, device=self.device)
-            self.log_probs[i] = dist.log_prob(action)
+            self.log_probs[i] = dist.log_prob(action).detach()
 
             if self.aux_info:
                 self.aux_info_collector.fill_dictionaries(i, env_info, extra_predictions)
@@ -188,8 +213,7 @@ class BaseAlgo(ABC):
             self.log_episode_num_frames *= self.mask
 
         # Add advantage and return to experiences
-
-        preprocessed_obs = self.preprocess_obss(self.obs, device=self.device)
+        preprocessed_obs = self.convert_obs(self.obs,self.device)
         with torch.no_grad():
             next_value = self.acmodel(preprocessed_obs, self.memory * self.mask.view(-1,1,1))['value']
 
@@ -200,7 +224,8 @@ class BaseAlgo(ABC):
 
             delta = self.rewards[i] + self.discount * next_value * next_mask - self.values[i]
             self.advantages[i] = delta + self.discount * self.gae_lambda * next_advantage * next_mask
-
+            # Normalize advantages
+            # self.advantages[i] = (self.advantages[i] - self.advantages[i].mean()) / (self.advantages[i].std() + 1e-10)
         # Flatten the data correctly, making sure that
         # each episode's data is a continuous chunk
 
@@ -228,8 +253,7 @@ class BaseAlgo(ABC):
             exps = self.aux_info_collector.end_collection(exps)
 
         # Preprocess experiences
-
-        exps.obs = self.preprocess_obss(exps.obs, device=self.device)
+        exps.obs = self.convert_obs(exps.obs,device=self.device)
 
         # Log some values
 

@@ -311,3 +311,7 @@ def load_agent(
         return ModelAgent(model_name, obss_preprocessor, argmax)
     elif demos_origin is not None or demos_name is not None:
         return DemoAgent(demos_name=demos_name, env_name=env_name, origin=demos_origin)
+    
+def load_ppo_agent(model,obss_preprocessor,argmax):
+    return TCModelAgent(model,obss_preprocessor,argmax)
+    

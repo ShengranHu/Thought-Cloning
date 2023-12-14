@@ -4,20 +4,20 @@ import torch.nn.functional as F
 
 
 from babyai.rl.algos.base_tc import BaseAlgo
-
+from babyai.utils.format import Vocabulary
 
 
 class PPOAlgo(BaseAlgo):
     """The class for the Proximal Policy Optimization algorithm
     ([Schulman et al., 2015](https://arxiv.org/abs/1707.06347))."""
 
-    def __init__(self, envs, acmodel, num_frames_per_proc=None, discount=0.99, lr=7e-4, beta1=0.9, beta2=0.999,
+    def __init__(self, envs, acmodel, model_name,num_frames_per_proc=None, discount=0.99, lr=7e-4, beta1=0.9, beta2=0.999,
                  gae_lambda=0.95,
                  entropy_coef=0.01, value_loss_coef=0.5, max_grad_norm=0.5, recurrence=4,
                  adam_eps=1e-5, clip_eps=0.2, epochs=4, batch_size=256, preprocess_obss=None,
-                 reshape_reward=None, aux_info=None):
+                 reshape_reward=None, aux_info=None,lower_only=False,hybrid_warmstart=False):
         num_frames_per_proc = num_frames_per_proc or 128
-
+        self.vocab = Vocabulary(model_name)
         super().__init__(envs, acmodel, num_frames_per_proc, discount, lr, gae_lambda, entropy_coef,
                          value_loss_coef, max_grad_norm, recurrence, preprocess_obss, reshape_reward,
                          aux_info)
@@ -25,15 +25,22 @@ class PPOAlgo(BaseAlgo):
         self.clip_eps = clip_eps
         self.epochs = epochs
         self.batch_size = batch_size
-
+        self.hybrid_warmstart = hybrid_warmstart
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.adam_eps = adam_eps
         assert self.batch_size % self.recurrence == 0
-
-        self.optimizer = torch.optim.Adam(self.acmodel.parameters(), lr, (beta1, beta2), eps=adam_eps)
+        if(hybrid_warmstart):
+            self.optimizer = torch.optim.Adam(self.acmodel.lower_level_policy.critic.parameters(), lr, (beta1, beta2), eps=adam_eps)
+        elif(lower_only):
+            self.optimizer = torch.optim.Adam(self.acmodel.lower_level_policy.parameters(), lr, (beta1, beta2), eps=adam_eps)
+        else:
+            self.optimizer = torch.optim.Adam(self.acmodel.parameters(), lr, (beta1, beta2), eps=adam_eps)
         self.batch_num = 0
+        self.first_update = True
 
     def update_parameters(self):
         # Collect experiences
-
         exps, logs = self.collect_experiences()
         '''
         exps is a DictList with the following keys ['obs', 'memory', 'mask', 'action', 'value', 'reward',
@@ -47,7 +54,7 @@ class PPOAlgo(BaseAlgo):
         being the added information. They are either (n_procs * n_frames_per_proc) 1D tensors or
         (n_procs * n_frames_per_proc) x k 2D tensors where k is the number of classes for multiclass classification
         '''
-
+        
         for _ in range(self.epochs):
             # Initialize log values
 
@@ -92,24 +99,24 @@ class PPOAlgo(BaseAlgo):
                     value = model_results['value']
                     memory = model_results['memory']
                     extra_predictions = model_results['extra_predictions']
-
-                    entropy = dist.entropy().mean()
+                    entropy_loss = -dist.entropy().mean()
 
                     ratio = torch.exp(dist.log_prob(sb.action) - sb.log_prob)
                     surr1 = ratio * sb.advantage
                     surr2 = torch.clamp(ratio, 1.0 - self.clip_eps, 1.0 + self.clip_eps) * sb.advantage
-                    policy_loss = -torch.min(surr1, surr2).mean()
+                    policy_loss = (-torch.min(surr1, surr2)).mean()
 
                     value_clipped = sb.value + torch.clamp(value - sb.value, -self.clip_eps, self.clip_eps)
-                    surr1 = (value - sb.returnn).pow(2)
-                    surr2 = (value_clipped - sb.returnn).pow(2)
-                    value_loss = torch.max(surr1, surr2).mean()
+                    #surr1 = (value - sb.returnn).pow(2)
+                    #surr2 = (value_clipped - sb.returnn).pow(2)
+                    #value_loss = torch.max(surr1, surr2).mean()
+                    value_loss = F.mse_loss(value_clipped,sb.returnn)
 
-                    loss = policy_loss - self.entropy_coef * entropy + self.value_loss_coef * value_loss
+                    loss = policy_loss + self.entropy_coef * entropy_loss + self.value_loss_coef * value_loss
 
                     # Update batch values
 
-                    batch_entropy += entropy.item()
+                    batch_entropy += entropy_loss.item()
                     batch_value += value.mean().item()
                     batch_policy_loss += policy_loss.item()
                     batch_value_loss += value_loss.item()
@@ -121,7 +128,6 @@ class PPOAlgo(BaseAlgo):
                         exps.memory[inds + i + 1] = memory.detach()
 
                 # Update batch values
-
                 batch_entropy /= self.recurrence
                 batch_value /= self.recurrence
                 batch_policy_loss /= self.recurrence
@@ -146,14 +152,15 @@ class PPOAlgo(BaseAlgo):
                 log_losses.append(batch_loss.item())
 
         # Log some values
-
         logs["entropy"] = numpy.mean(log_entropies)
         logs["value"] = numpy.mean(log_values)
         logs["policy_loss"] = numpy.mean(log_policy_losses)
         logs["value_loss"] = numpy.mean(log_value_losses)
         logs["grad_norm"] = numpy.mean(log_grad_norms)
         logs["loss"] = numpy.mean(log_losses)
-
+        if(self.first_update and self.hybrid_warmstart):
+            self.first_update = False
+            self.optimizer = torch.optim.Adam(self.acmodel.parameters(), self.lr, (self.beta1, self.beta2), eps=self.adam_eps)
         return logs
 
     def _get_batches_starting_indexes(self):
