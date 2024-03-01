@@ -80,9 +80,10 @@ Our implementation is based on [BabyAI 1.1](https://github.com/mila-iqia/babyai)
 If you find this project useful, please consider citing:
 ```
 @article{hu2023ThoughtCloning,
-  title={{Thought Cloning}: Learning to Think while Acting by Imitating Human Thinking},
-  author={Shengran Hu and Jeff Clune},
-  year={2023},
+  title={{Thought Cloning}: Learning to think while acting by imitating human thinking},
+  author={Hu, Shengran and Clune, Jeff},
   journal={Advances in Neural Information Processing Systems},
+  volume={36},
+  year={2024}
 }
 ```
