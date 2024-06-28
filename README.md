@@ -84,6 +84,6 @@ If you find this project useful, please consider citing:
   author={Hu, Shengran and Clune, Jeff},
   journal={Advances in Neural Information Processing Systems},
   volume={36},
-  year={2024}
+  year={2023}
 }
 ```
